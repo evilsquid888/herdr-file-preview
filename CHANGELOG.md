@@ -38,6 +38,7 @@ so read its notes before updating.
 - Fixed: a repository's own `filter.<name>.clean` or `.process` command still ran, on
   every tracked file that the mod's periodic `git status` (or a diff) re-hashed, which in
   a copied folder is all of them. Every git call now blanks the filters the repo's config
+  (including files it pulls in with `[include]` / `[includeIf]`, and `config.worktree`)
   defines before running.
 
 ## 1.0.0 — 2026-11-06

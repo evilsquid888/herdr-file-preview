@@ -12,8 +12,14 @@ import { sh, slash, localWindows } from "./shell.js";
 // clean, smudge and process commands are empty and `required` can't make that an error. Names are
 // newline-separated: git refuses a newline in a subsection name. A filter can't be named by
 // wildcard, so this covers in-tree .gitattributes and .git/info/attributes alike.
+// The listing follows [include] / [includeIf] (--includes: a file option like --local doesn't by
+// default) and also reads the worktree's own config.worktree (--worktree; without that extension
+// it reads .git/config again, which only repeats names). Either listing may fail on its own, so
+// neither can cut the other short. Filters set in your global or system config are yours, not
+// the folder's, and stay on (git-lfs keeps working).
 // (Its variables are fp-prefixed: the scripts that use `g` keep short names like $n and $s.)
-const FILTERS = 'fpF() { fpF=1; fpI=${GIT_CONFIG_COUNT:-0}; fpN=$(git -C "$r" config --local --name-only --get-regexp "^filter[.]" 2>/dev/null) || return 0; '
+const FILTERS = 'fpF() { fpF=1; fpI=${GIT_CONFIG_COUNT:-0}; '
+  + 'fpN=$( { git -C "$r" config --local --includes --name-only --get-regexp "^filter[.]"; git -C "$r" config --worktree --includes --name-only --get-regexp "^filter[.]"; } 2>/dev/null; true ); '
   + 'fpIFS=$IFS; IFS="\n"; set -f; for fpK in $fpN; do fpK=${fpK#filter.}; fpK=${fpK%.*}; '
   + 'for fpV in clean smudge process; do export "GIT_CONFIG_KEY_$fpI=filter.$fpK.$fpV" "GIT_CONFIG_VALUE_$fpI="; fpI=$((fpI+1)); done; '
   + 'export "GIT_CONFIG_KEY_$fpI=filter.$fpK.required" "GIT_CONFIG_VALUE_$fpI=false"; fpI=$((fpI+1)); done; '
