@@ -18,7 +18,7 @@ export function segment(source) {
     const text = prose.join("\n");
     prose = [];
     if (!text.trim()) return;
-    for (const c of chunks(text)) out.push({ kind: "md", text: c.text, start: from + c.line + 1, end: from + c.line + c.text.split("\n").length });
+    for (const c of paragraphs(text)) out.push({ kind: "md", text: c.text, start: from + c.line + 1, end: from + c.line + c.text.split("\n").length });
   };
   for (let i = 0; i < lines.length; i++) {
     const m = OPEN.exec(lines[i]);
@@ -41,6 +41,34 @@ function stripIndent(line, n) {
   let k = 0;
   while (k < n && line[k] === " ") k++;
   return line.slice(k);
+}
+
+/**
+ * Prose cut at blank lines, so each paragraph is its own block (and can carry comments).
+ * -> [{ text, line }]: line = the piece's first line within `text`, from 0.
+ * A piece that starts indented continues the one before it (a list item's second paragraph,
+ * a nested list): alone it would render as an indented code block. Huge pieces still go
+ * through chunks().
+ */
+function paragraphs(text) {
+  const lines = text.split("\n"), out = [];
+  let cur = null;
+  const push = () => {
+    if (cur) for (const c of chunks(cur.lines.join("\n"))) out.push({ text: c.text, line: cur.line + c.line });
+    cur = null;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l.trim()) { if (cur) cur.blank = true; continue; }
+    const continues = cur && cur.blank && /^(\s{2,}|\t)/.test(l);
+    if (cur && cur.blank && !continues) push();
+    if (!cur) cur = { line: i, lines: [], blank: false };
+    else if (cur.blank) for (let k = cur.line + cur.lines.length; k < i; k++) cur.lines.push("");
+    cur.lines.push(l);
+    cur.blank = false;
+  }
+  push();
+  return out;
 }
 
 /** -> [{ text, line }]: line = the chunk's first line within `text`, from 0. */

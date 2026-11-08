@@ -2,8 +2,8 @@
 // Markdown (prose in TextView, fences highlighted in readonly Editors, Mermaid as PNG) and code.
 // It follows the focused terminal (local or remote space) and reloads what it shows when it changes.
 import { View, div, svg, image } from "gpui-kit";
-import { v_flex, h_flex, h_resizable, resizable_panel, Editor, EditorState, TextView, Scrollbar, v_virtual_list, VirtualListScrollHandle, InputState, Input } from "gpui-base";
-import { spaces, panes, focused, exec, watchFolder, theme, settings, props, closeOverlay, openOverlay, nextCommand, home, window, run, shared, setShared } from "herdr";
+import { v_flex, h_flex, h_resizable, resizable_panel, Editor, EditorState, TextView, Scrollbar, v_virtual_list, VirtualListScrollHandle, InputState, Input, Textarea, TextareaState } from "gpui-base";
+import { spaces, panes, focused, exec, watchFolder, theme, settings, props, closeOverlay, openOverlay, nextCommand, home, window, run, shared, setShared, agents } from "herdr";
 import { Tree, parent, PER_FOLDER, TOTAL } from "./tree.js";
 import { readSource, stamp, LIMIT } from "./source.js";
 import { segment } from "./markdown.js";
@@ -16,6 +16,7 @@ import { listFiles, rank, occurrences, positions, markMatches, syntaxMask, headi
 import { rootKey, recall, snapshot, remember, forget } from "./memory.js";
 import * as hist from "./commits.js";
 import { cell, reach, pointer, palette } from "./graph.js";
+import { Notes, noteKey, quoteOf, DRAG_PX } from "./annotate.js";
 
 const ICON = "mods/file-preview/icons/";
 const ROW = 22;              // tree row height
@@ -167,9 +168,15 @@ export default class FilePreview extends View {
     const p = props() ?? {};
     this.overlay = p.overlay ?? null;
     this.mode = p.mode ?? "popup";
+    this.pinned = Boolean(p.pin && p.cwd);   // opened on a given folder (a launcher): don't follow the focused terminal
     this.fromSide = p.from === "side" && Boolean(this.overlay);   // a popup opened from the side panel goes back to it
     this.zoom = null;       // the expanded diagram (Zoom), if any
     this.blocks = [];       // [{ kind: "md", text } | { kind: "code", info, lines, state }]
+    // Annotations: a press in a paragraph (pressed), the "+ Comment" bar a drag offers (aiming),
+    // the open comment field (commenting). Notes live on this computer (annotate.js).
+    this.notes = new Notes();
+    this.pressed = null; this.aiming = null; this.commenting = null;
+    cx.spawn(async (cx) => { await this.notes.load(); cx.notify(); });
     this.zoomFocus = cx.focus_handle();
     // Esc is the app's (it closes the popup's dialog before on_key_down sees it):
     // a binding of our own, scoped to the expanded diagram's key context, comes first.
@@ -328,6 +335,7 @@ export default class FilePreview extends View {
   follow(cx) {
     const f = focused();
     if (!f?.terminal) return;        // a mod pane (this one too) or no window: keep the last root
+    if (this.pinned) return;
     const l = location();
     if (!l.cwd && !l.on) return;
     const key = ctxKey(l);
@@ -1814,6 +1822,8 @@ export default class FilePreview extends View {
     // (no occlusion API), and the EditorStates stay retained for the way back.
     if (this.zoom) return v_flex().id("fp-root").size_full().min_h(0).on_size_change((box, cx) => this.sized(box, cx)).child(this.zoomLayer(t));
     return v_flex().id("fp-root").size_full().min_h(0).bg(t.surface).text_color(t.foreground).text_size(13)
+      .on_mouse_down("left", (_e, cx) => this.aimAway(cx))
+      .on_mouse_up("left", (e, cx) => this.aimUp(null, e, cx))
       // The side panel is a card like Herdr's Files and Changes panels next to it.
       .when(this.mode === "side", (el) => el.rounded(10).overflow_hidden().border_1().border_color(t.border))
       .on_size_change((box, cx) => this.sized(box, cx))
@@ -2321,13 +2331,17 @@ export default class FilePreview extends View {
     else if (!this.file) body = this.message(t, "Select a file", "↑ ↓ move · → ← open/close folder · Enter open · Tab tree/preview · b show/hide tree · / find · + − 0 zoom · r reload" + (this.overlay ? " · Esc close" : ""));
     else if (!doc) body = this.message(t, "Loading…");
     else if (doc.kind === "markdown")
-      body = v_flex().id(`doc:${this.file}`).flex_1().min_h(0).overflow_y_scrollbar()
+      body = v_flex().flex_1().min_h(0).child(this.notesBar(t)).child(v_flex().id(`doc:${this.file}`).flex_1().min_h(0).overflow_y_scrollbar()
         .child(h_flex().w_full().justify_center().px(narrow ? 12 : 24).py(narrow ? 12 : 20)
           .child(v_flex().id("fp-col").w_full().max_w(Math.round(COL_W * this.textZoom)).gap(Math.round(12 * this.textZoom)).text_size(this.proseSize())
             .on_size_change((size, cx) => { if (Math.round(size.width) !== this.colW) { this.colW = Math.round(size.width); cx.notify(); } })
-            .children(this.blocks.map((b, i) => this.marked(b, t, b.kind === "md"
-              ? TextView.markdown(`md-${i}`, this.markedText(b, t)).selectable(true).on_link_click((url, cx) => this.link(url, cx))
-              : b.kind === "mmd" ? this.diagramBlock(b, i, t) : this.codeBlock(b, i, t))))));
+            .children((() => {
+              const placed = this.notes.place(this.noteKey(), this.blocks).at;
+              return this.blocks.map((b, i) => b.kind === "md"
+                ? this.annotated(b, i, t, placed[i] ?? [], this.marked(b, t, this.aimable(i,
+                  TextView.markdown(`md-${i}`, this.markedText(b, t)).selectable(true).on_link_click((url, cx) => this.link(url, cx)))))
+                : this.marked(b, t, b.kind === "mmd" ? this.diagramBlock(b, i, t) : this.codeBlock(b, i, t)));
+            })()))));
     else if (doc.kind === "text" && this.code) body = this.codeView(t);
     else body = this.message(t, doc.message ?? "Cannot preview this file");
     return v_flex().id("fp-preview-pane").flex_1().min_w(0).h_full().min_h(0).bg(t.surface)
@@ -2336,6 +2350,229 @@ export default class FilePreview extends View {
       .when(Boolean(this.atCommit), (el) => el.child(this.atBanner(t)))
       .when(Boolean(this.ds), (el) => el.child(this.findBar("doc", t)))
       .child(body);
+  }
+
+  // ---- annotations ----
+
+  /**
+   * The agents a draft can go to, all on the file's machine: the shown tab's, else every one
+   * there (a popup opened on another machine's folder is not that tab's).
+   */
+  draftTargets() {
+    const tab = activeTab(), on = this.ctx?.on ?? null;
+    const sameMachine = (a) => (on ? a.address.startsWith(`${on}/`) : !a.address.includes("/"));
+    const there = agents().filter(sameMachine);
+    const inTab = there.filter((a) => a.tab === tab);
+    return inTab.length ? inTab : there;
+  }
+
+  /** The comments of the open file, in document order, with their paragraph and section. */
+  noteItems() {
+    const key = this.noteKey();
+    if (!key) return [];
+    const { at, lost } = this.notes.place(key, this.blocks);
+    const heads = headings(this.blocks);
+    const items = [];
+    this.blocks.forEach((b, i) => { for (const note of at[i] ?? []) items.push({ note, block: b, section: section(heads, b.start)?.text ?? null }); });
+    for (const note of lost) items.push({ note, block: null, section: null });
+    return items;
+  }
+
+  feedbackText(items) {
+    const abs = this.tree.abs(this.file);
+    return Notes.feedback(items, { name: this.file.split("/").pop(), where: this.ctx?.on ? `${this.ctx.on}:${abs}` : abs });
+  }
+
+  /** Copy: the feedback (unsent comments, else all) on the clipboard. */
+  copyFeedback(cx) {
+    const items = this.noteItems(), unsent = items.filter((x) => !x.note.sent);
+    const use = unsent.length ? unsent : items;
+    if (!use.length) return;
+    cx.write_to_clipboard(this.feedbackText(use));
+    this.noteStatus = { text: `Copied ${use.length} comment${use.length === 1 ? "" : "s"}`, until: Date.now() + 2500 };
+    cx.notify();
+    cx.timer.after(2600, (cx) => cx.notify());
+  }
+
+  /**
+   * Draft: pastes the feedback into the agent's prompt without pressing Enter, for review there.
+   * Clipboard → focus that terminal → terminal.paste (the clipboard keeps the text afterwards).
+   */
+  draftTo(agent, cx) {
+    const items = this.noteItems(), unsent = items.filter((x) => !x.note.sent);
+    const use = unsent.length ? unsent : items;
+    if (!use.length || !agent) return;
+    const key = this.noteKey();
+    cx.write_to_clipboard(this.feedbackText(use));
+    this.picking = false;
+    if (this.overlay) closeOverlay(this.overlay);   // the popup would keep the keyboard
+    run("pane.focus", { terminal: agent.address });
+    run("terminal.paste");
+    const to = `${agent.program?.name ?? agent.app ?? "agent"} · ${agent.tab_name || agent.space_name}`;
+    this.noteStatus = { text: `Drafted into ${to}: review it there, then press Enter`, until: Date.now() + 6000 };
+    cx.spawn(async (cx) => { await this.notes.markSent(key, use.map((x) => x.note.id), agent.address); cx.notify(); });
+    cx.timer.after(6100, (cx) => cx.notify());
+  }
+
+  sendClick(cx) {
+    const targets = this.draftTargets();
+    if (targets.length === 1) return this.draftTo(targets[0], cx);
+    if (!targets.length) {
+      this.noteStatus = { text: "No agent in this tab: use Copy, or start one", until: Date.now() + 4000 };
+      cx.timer.after(4100, (cx) => cx.notify());
+    } else this.picking = !this.picking;
+    cx.notify();
+  }
+
+  clearNotes(cx) {
+    const key = this.noteKey();
+    if (!key) return;
+    this.picking = false;
+    cx.spawn(async (cx) => { await this.notes.clear(key); cx.notify(); });
+  }
+
+  /** The bar over a commented document: count, Send to agent (a draft), Copy, Clear. */
+  notesBar(t) {
+    const items = this.noteItems();
+    const status = this.noteStatus && this.noteStatus.until > Date.now() ? this.noteStatus.text : this.notes.error;
+    if (!items.length && !status) return div();
+    const unsent = items.filter((x) => !x.note.sent).length;
+    const stop = (_e, cx) => cx.stop_propagation();
+    const btn = (id, label, primary, go, tip) => h_flex().id(id).h(24).flex_none().px(10).items_center().rounded(5).cursor_pointer()
+      .when(primary, (e) => e.bg(t.solid).text_color(t.solid_foreground).hover((s) => s.bg(t.accent).text_color(t.accent_foreground)))
+      .when(!primary, (e) => e.border_1().border_color(t.border).text_color(t.muted).hover((s) => s.bg(t.hover)))
+      .when(Boolean(tip), (e) => e.tooltip(tip))
+      .on_mouse_down("left", stop).on_click(go).child(div().text_size(12).child(label));
+    const targets = this.picking ? this.draftTargets() : [];
+    return v_flex().flex_none().w_full().border_b(1).border_color(t.border).bg(t.raised)
+      .child(h_flex().w_full().h(38).px(12).gap(8).items_center()
+        .child(div().flex_none().text_size(12).text_color(t.ansi3).child("💬"))
+        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(status ? t.foreground : t.muted)
+          .child(status ?? (items.length ? `${items.length} comment${items.length === 1 ? "" : "s"}${unsent < items.length ? ` · ${items.length - unsent} drafted` : ""}` : "")))
+        .when(items.length > 0, (e) => e
+          .child(btn("fp-notes-send", unsent ? `Send to agent (${unsent})` : "Send again", true, (_e, cx) => this.sendClick(cx),
+            "Pastes the comments into the agent's prompt without pressing Enter, so you can review them there"))
+          .child(btn("fp-notes-copy", "Copy", false, (_e, cx) => this.copyFeedback(cx), "Copies the comments as feedback"))
+          .child(btn("fp-notes-clear", "Clear", false, (_e, cx) => this.clearNotes(cx), "Deletes this file's comments"))))
+      .when(targets.length > 0, (e) => e.child(v_flex().w_full().px(12).pb(8).gap(3)
+        .child(div().text_size(11).text_color(t.dim).child("Draft into which agent?"))
+        .children(targets.map((a) => h_flex().id(`fp-pick-${a.address}`).h(26).px(8).gap(8).items_center().rounded(5).cursor_pointer()
+          .hover((s) => s.bg(t.hover)).on_mouse_down("left", stop).on_click((_e, cx) => this.draftTo(a, cx))
+          .child(div().flex_none().text_size(12).text_color(t.foreground).child(a.program?.name ?? a.app ?? "Agent"))
+          .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(`${a.space_name} · ${a.tab_name || ""} · ${a.address} · ${a.status}`))))));
+  }
+
+  /** The open file's key in the comments store: machine (or "local") and absolute path. */
+  noteKey() { return this.file && this.tree?.root ? noteKey(this.ctx?.on, this.tree.abs(this.file)) : null; }
+
+  /** Press / release / right-click handlers, on a paragraph's TextView (which may keep the press). */
+  aimable(i, el) {
+    return el
+      .on_mouse_down("left", (e) => this.aimDown(i, e))
+      .on_mouse_up("left", (e, cx) => this.aimUp(i, e, cx))
+      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.openComment(i, cx); });
+  }
+
+  aimDown(i, e) {
+    this.pressed = { i, when: Date.now(), x: Number(e?.position?.x) || 0, y: Number(e?.position?.y) || 0 };
+  }
+
+  /** A release: a drag of DRAG_PX or more offers "+ Comment" on the paragraph it started in. */
+  aimUp(i, e, cx) {
+    const down = this.pressed;
+    this.pressed = null;
+    if (!down || this.commenting) return;
+    const x = Number(e?.position?.x) || 0, y = Number(e?.position?.y) || 0;
+    if (Math.hypot(x - down.x, y - down.y) < DRAG_PX) return;
+    this.aiming = { i: down.i };
+    cx?.notify();
+  }
+
+  /** A press anywhere else puts the bar away (the bar and the field stop their own presses). */
+  aimAway(cx) {
+    if (this.pressed && Date.now() - this.pressed.when > 32) this.pressed = null;
+    if (!this.aiming) return;
+    this.aiming = null;
+    cx?.notify();
+  }
+
+  /** The comment field on paragraph i: a new comment, or `edit` (a note) to change its words. */
+  openComment(i, cx, edit = null) {
+    const b = this.blocks[i];
+    if (!b || b.kind !== "md" || !this.noteKey()) return;
+    this.closeComment();
+    const field = TextareaState.new({ placeholder: "What about this paragraph?", value: edit?.text ?? "" });
+    field.set_auto_grow(2, 8);
+    // Ctrl/Cmd-Enter saves (a secondary submit); Enter makes a new line.
+    field.on("submit", (ev, cx) => { if (ev?.secondary === true) this.saveComment(cx); });
+    this.commenting = { i, field, quote: quoteOf(b.text), edit };
+    this.aiming = null; this.pressed = null;
+    cx?.notify();
+    cx?.spawn(async (cx) => { await cx.sleep(30); if (this.commenting?.field === field) { field.focus(); cx.notify(); } });
+  }
+
+  closeComment(cx) {
+    const c = this.commenting;
+    this.commenting = null;
+    try { c?.field?.release?.(); } catch { /* already released */ }
+    cx?.notify();
+  }
+
+  saveComment(cx) {
+    const c = this.commenting, key = this.noteKey();
+    if (!c || !key) return;
+    const text = String(c.field.value() ?? "").trim(), b = this.blocks[c.i];
+    this.closeComment(cx);
+    if (!text || !b) return;
+    if (c.edit) cx.spawn(async (cx) => { await this.notes.update(key, c.edit.id, text); cx.notify(); });
+    else cx.spawn(async (cx) => { await this.notes.add(key, b, text); cx.notify(); });
+  }
+
+  deleteComment(id, cx) {
+    const key = this.noteKey();
+    if (!key) return;
+    cx.spawn(async (cx) => { await this.notes.remove(key, id); cx.notify(); });
+  }
+
+  /** A paragraph with its comments: an accent bar, the "+ Comment" offer, the field, the notes. */
+  annotated(b, i, t, notes, el) {
+    const stop = (_e, cx) => cx.stop_propagation();
+    const aiming = this.aiming?.i === i, writing = this.commenting?.i === i;
+    const pill = (id, label, primary, go) => h_flex().id(id).h(22).flex_none().px(9).items_center().rounded(5).cursor_pointer()
+      .when(primary, (e) => e.bg(t.solid).text_color(t.solid_foreground).hover((s) => s.bg(t.accent).text_color(t.accent_foreground)))
+      .when(!primary, (e) => e.text_color(t.muted).hover((s) => s.bg(t.hover)))
+      .on_mouse_down("left", stop).on_click(go).child(div().text_size(11.5).child(label));
+    return v_flex().id(`ann-${i}`).w_full().flex_none().relative()
+      .on_mouse_down("left", (e) => this.aimDown(i, e))
+      .on_mouse_up("left", (e, cx) => this.aimUp(i, e, cx))
+      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.openComment(i, cx); })
+      .child(el)
+      // Commented, or being commented: a bar in the left padding, like a margin note.
+      .when(notes.length > 0 || writing || aiming, (e) => e.child(div().absolute().top(0).bottom(0).left(-BAR_X - 2).w(3).rounded(2)
+        .bg(notes.length ? t.ansi3 : t.accent)))
+      .when(aiming, (e) => e.child(h_flex().mt(4).flex_none().gap(6).items_center()
+        .child(pill(`ann-offer-${i}`, "+ Comment", true, (_e, cx) => this.openComment(i, cx)))
+        .child(div().text_size(11).text_color(t.dim).child("on this paragraph"))))
+      .when(notes.length > 0, (e) => e.child(v_flex().mt(6).gap(4).flex_none().children(notes.map((n) => h_flex().id(`note-${n.id}`)
+        .w_full().px(8).py(5).gap(8).items_start().rounded(6).bg(t.raised).border_1().border_color(t.border)
+        .on_mouse_down("left", stop)
+        .when(Boolean(n.sent), (e) => e.opacity(0.6))
+        .child(div().flex_none().text_size(11).text_color(n.sent ? t.ansi2 : t.ansi3).child(n.sent ? "✓" : "💬"))
+        .child(div().flex_1().min_w(0).text_size(12).text_color(t.foreground).child(n.text))
+        .when(Boolean(n.sent), (e) => e.child(div().flex_none().text_size(10.5).text_color(t.dim).child("drafted")))
+        .child(div().id(`note-e-${n.id}`).flex_none().px(4).cursor_pointer().text_size(11).text_color(t.dim).tooltip("Edit")
+          .hover((s) => s.text_color(t.accent)).on_click((_e, cx) => this.openComment(i, cx, n)).child("✎"))
+        .child(div().id(`note-x-${n.id}`).flex_none().px(4).cursor_pointer().text_size(11).text_color(t.dim).tooltip("Delete")
+          .hover((s) => s.text_color(t.ansi1)).on_click((_e, cx) => this.deleteComment(n.id, cx)).child("✕"))))))
+      .when(writing, (e) => e.child(v_flex().id(`ann-box-${i}`).w_full().mt(6).gap(5).p(7).flex_none().rounded(7)
+        .bg(t.popover).border_1().border_color(t.accent)
+        .on_mouse_down("left", stop).on_mouse_down("right", stop)
+        .child(div().truncate().text_size(10.5).text_color(t.dim).child(`On: "${this.commenting.quote}"`))
+        .child(div().w_full().child(Textarea.new(this.commenting.field)))
+        .child(h_flex().gap(4).items_center()
+          .child(div().flex_1().text_size(10.5).text_color(t.dim).child(this.notes.error ?? "Ctrl+Enter to save"))
+          .child(pill(`ann-cancel-${i}`, "Cancel", false, (_e, cx) => this.closeComment(cx)))
+          .child(pill(`ann-ok-${i}`, this.commenting.edit ? "Save" : "Comment", true, (_e, cx) => this.saveComment(cx))))));
   }
 
   /** A Markdown block with its search marks, drawn in the column's side padding so nothing moves. */
