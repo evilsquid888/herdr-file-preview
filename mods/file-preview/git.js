@@ -17,10 +17,28 @@ import { sh, slash, localWindows } from "./shell.js";
 // it reads .git/config again, which only repeats names). Either listing may fail on its own, so
 // neither can cut the other short. Filters set in your global or system config are yours, not
 // the folder's, and stay on (git-lfs keeps working).
+//
+// Submodules: `git status` runs another git inside each one, which inherits the -c options and
+// GIT_CONFIG_* (so fsmonitor & co. stay off there), but a submodule's own config can name its own
+// filters. So fpL walks the submodules too, breadth first (sh functions have no local variables,
+// so no recursion): `ls-files --stage` lists them (mode 160000; it reads the index and hashes
+// nothing), and `git config` inside each reads that submodule's config, absorbed
+// (.git/modules/…) or not. Up to 3 levels and 200 submodules; past that, `!cap` makes g() ignore
+// the inside of submodules (diff.ignoreSubmodules=dirty) instead of leaving any unchecked.
 // (Its variables are fp-prefixed: the scripts that use `g` keep short names like $n and $s.)
-const FILTERS = 'fpF() { fpF=1; fpI=${GIT_CONFIG_COUNT:-0}; '
-  + 'fpN=$( { git -C "$r" config --local --includes --name-only --get-regexp "^filter[.]"; git -C "$r" config --worktree --includes --name-only --get-regexp "^filter[.]"; } 2>/dev/null; true ); '
-  + 'fpIFS=$IFS; IFS="\n"; set -f; for fpK in $fpN; do fpK=${fpK#filter.}; fpK=${fpK%.*}; '
+const LIST_FILTERS = 'fpL() { fpQ=$r; fpD=0; fpC=0; '
+  + 'while [ -n "$fpQ" ]; do fpX=""; for fpW in $fpQ; do '
+  + 'git -C "$fpW" config --local --includes --name-only --get-regexp "^filter[.]"; '
+  + 'git -C "$fpW" config --worktree --includes --name-only --get-regexp "^filter[.]"; '
+  + '[ "$fpD" -lt 3 ] || continue; '
+  + 'for fpS in $(git -c core.fsmonitor=false -c core.quotepath=off -C "$fpW" ls-files --stage | grep "^160000 " | cut -f2-); do '
+  + 'case "$fpS" in \\"*) echo "!cap"; continue;; esac; '
+  + 'fpC=$((fpC+1)); if [ "$fpC" -gt 200 ]; then echo "!cap"; break; fi; '
+  + 'fpX="$fpX$fpW/$fpS\n"; done; done; fpQ=$fpX; fpD=$((fpD+1)); done; }';
+const FILTERS = LIST_FILTERS + '; fpF() { fpF=1; fpI=${GIT_CONFIG_COUNT:-0}; '
+  + 'fpN=$( IFS="\n"; set -f; fpL 2>/dev/null; true ); '
+  + 'case "$fpN" in *"!cap"*) export "GIT_CONFIG_KEY_$fpI=diff.ignoreSubmodules" "GIT_CONFIG_VALUE_$fpI=dirty"; fpI=$((fpI+1));; esac; '
+  + 'fpIFS=$IFS; IFS="\n"; set -f; for fpK in $fpN; do case "$fpK" in filter.*) ;; *) continue;; esac; fpK=${fpK#filter.}; fpK=${fpK%.*}; '
   + 'for fpV in clean smudge process; do export "GIT_CONFIG_KEY_$fpI=filter.$fpK.$fpV" "GIT_CONFIG_VALUE_$fpI="; fpI=$((fpI+1)); done; '
   + 'export "GIT_CONFIG_KEY_$fpI=filter.$fpK.required" "GIT_CONFIG_VALUE_$fpI=false"; fpI=$((fpI+1)); done; '
   + 'set +f; IFS=$fpIFS; export GIT_CONFIG_COUNT=$fpI; }';

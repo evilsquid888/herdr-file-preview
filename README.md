@@ -293,7 +293,8 @@ still reach, and how the mod keeps it out:
   `log.showSignature=false` and `gpg.program=false`, diffs use `--no-ext-diff
   --no-textconv`, and the clean, smudge and process commands of every `filter` that
   config defines are blanked first (`git status` would otherwise run them on each file it
-  re-hashes), so that config can't name a program for git to run.
+  re-hashes), in the folder and in its submodules (nested ones too), so that config can't
+  name a program for git to run.
 - **Markdown and HTML** are drawn by Herdr's own renderer: no JavaScript, no CSS, no
   network. Links open only when you click them.
 - **Pictures in documents** load only when they are image files under the folder you

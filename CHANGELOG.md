@@ -39,6 +39,8 @@ so read its notes before updating.
   every tracked file that the mod's periodic `git status` (or a diff) re-hashed, which in
   a copied folder is all of them. Every git call now blanks the filters the repo's config
   (including files it pulls in with `[include]` / `[includeIf]`, and `config.worktree`)
+  and those of every submodule (nested ones too, up to 3 levels and 200 submodules; past
+  that, the inside of submodules isn't checked rather than checked unsafely)
   defines before running.
 
 ## 1.0.0 — 2026-11-06
