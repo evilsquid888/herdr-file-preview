@@ -58,6 +58,15 @@ function renderPage(source, theme) {
 const staticPage = (svg) => `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP_STATIC}">
 <style>html,body{margin:0;padding:0;background:transparent}#d{display:inline-block;padding:8px}</style></head><body><div id="d">${svg}</div></body></html>`;
 
+// A short log of the renderer's steps (setup and failures), for troubleshooting: .cache/mermaid.log
+let LOG = [];
+export function mlog(line) {
+  LOG.push(`${new Date().toISOString().slice(11, 19)} ${line}`);
+  LOG = LOG.slice(-60);
+  const NL = String.fromCharCode(10);
+  fs.mkdir(dir(), { recursive: true }).then(() => fs.writeFile(dir() + "mermaid.log", LOG.join(NL) + NL)).catch(() => {});
+}
+
 const unescapeHtml = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
 
 const BROWSERS = [
@@ -205,6 +214,7 @@ export class Mermaid {
     const done = await this.load(job.key);
     if (done) { answer(done); return null; }
     const tool = await (this.tool ??= this.resolve());
+    mlog(`tool: ${JSON.stringify(tool)}`);
     if (tool.error) { answer({ error: tool.error, setup: true }); return null; }
     if (tool.kind === "browser") { await this.runBrowser(job, tool, answer); return null; }
     const base = dir() + job.key, png = base + ".png";
@@ -234,6 +244,7 @@ export class Mermaid {
     const fail = (e) => ({ code: -1, stdout: "", stderr: String(e?.message ?? e) });
     const r1 = await exec(tool.browser, [...common, "--virtual-time-budget=15000", "--dump-dom", url(base + ".html")]).catch(fail);
     const dom = r1.stdout ?? "";
+    mlog(`dump-dom ${job.key}: code ${r1.code}, ${dom.length} chars, stderr ${JSON.stringify(String(r1.stderr ?? "").slice(-300))}`);
     const err = dom.match(/<pre id="s">ERR:([\s\S]*?)<\/pre>/);
     if (err) { answer({ error: trimError(unescapeHtml(err[1])) }); return; }
     const size = dom.match(/<pre id="s">SIZE:(\d+)x(\d+)<\/pre>/), svg = dom.match(/<svg[\s\S]*<\/svg>/)?.[0];
@@ -242,6 +253,7 @@ export class Mermaid {
     await fs.writeFile(base + ".svg.html", staticPage(svg));
     const r2 = await exec(tool.browser, [...common, `--force-device-scale-factor=${scale}`, `--window-size=${w},${h}`,
       "--default-background-color=00000000", `--screenshot=${native(base + ".png")}`, url(base + ".svg.html")]).catch(fail);
+    mlog(`screenshot ${job.key}: code ${r2.code}, stderr ${JSON.stringify(String(r2.stderr ?? "").slice(-300))}`);
     fs.unlink(base + ".html").catch(() => {}); fs.unlink(base + ".svg.html").catch(() => {});
     answer((await this.load(job.key)) ?? { error: `The browser finished without writing a PNG${r2.code === -1 ? `: ${r2.stderr.slice(0, 200)}` : ""}` });
   }

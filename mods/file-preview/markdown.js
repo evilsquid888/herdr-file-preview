@@ -11,7 +11,9 @@ const CHUNK = 32000;
  * start/end: the source lines the block covers, from 1, inclusive (a fence with its fence lines).
  */
 export function segment(source) {
-  const lines = source.split("\n"), out = [];
+  // Windows line endings (CRLF, a local file on Windows): "." stops at "\r", so a fence line
+  // "```mermaid\r" wouldn't match OPEN. Same lines, same numbers, without the "\r".
+  const lines = source.replace(/\r\n?/g, "\n").split("\n"), out = [];
   let prose = [], from = 0;
   const flush = () => {
     if (!prose.length) return;
