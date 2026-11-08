@@ -290,8 +290,10 @@ still reach, and how the mod keeps it out:
 
 - **Git**: a folder can carry its own `.git/config` (a downloaded folder can; `git clone`
   doesn't copy it). Every git call forces `core.fsmonitor=false`,
-  `log.showSignature=false` and `gpg.program=false`, and diffs use `--no-ext-diff
-  --no-textconv`, so that config can't name a program for git to run.
+  `log.showSignature=false` and `gpg.program=false`, diffs use `--no-ext-diff
+  --no-textconv`, and the clean, smudge and process commands of every `filter` that
+  config defines are blanked first (`git status` would otherwise run them on each file it
+  re-hashes), so that config can't name a program for git to run.
 - **Markdown and HTML** are drawn by Herdr's own renderer: no JavaScript, no CSS, no
   network. Links open only when you click them.
 - **Pictures in documents** load only when they are image files under the folder you

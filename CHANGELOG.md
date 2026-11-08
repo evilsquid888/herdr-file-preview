@@ -35,6 +35,10 @@ so read its notes before updating.
 - Pictures in documents load only when they are image files under the browsed folder.
 - Git calls never verify signatures (`log.showSignature=false`, `gpg.program=false`), so a
   repository's own config can't name a program for git to run.
+- Fixed: a repository's own `filter.<name>.clean` or `.process` command still ran, on
+  every tracked file that the mod's periodic `git status` (or a diff) re-hashed, which in
+  a copied folder is all of them. Every git call now blanks the filters the repo's config
+  defines before running.
 
 ## 1.0.0 — 2026-11-06
 

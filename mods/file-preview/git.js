@@ -4,7 +4,21 @@ import { sh, slash, localWindows } from "./shell.js";
 
 // Reads that write nothing under .git (no index refresh, lock or fsmonitor cookie): the folder
 // watch would see the write and start the next refresh. quotepath=off keeps UTF-8 names raw.
-export const GIT = 'g() { git --no-optional-locks -c core.fsmonitor=false -c log.showSignature=false -c gpg.program=false -c core.quotepath=off -c diff.autoRefreshIndex=false -C "$r" "$@"; }';
+//
+// A repository's own config can name programs. `filter.<name>.clean` and `.process` run `sh -c` on
+// every tracked file that `status` or `diff` re-hashes, and a copied folder's stale stat info makes
+// that every file, on every poll. Before its first git call, `g` lists the repo's filters (`git
+// config` runs nothing) and blanks each one through GIT_CONFIG_*, which git treats like -c, so the
+// clean, smudge and process commands are empty and `required` can't make that an error. Names are
+// newline-separated: git refuses a newline in a subsection name. A filter can't be named by
+// wildcard, so this covers in-tree .gitattributes and .git/info/attributes alike.
+// (Its variables are fp-prefixed: the scripts that use `g` keep short names like $n and $s.)
+const FILTERS = 'fpF() { fpF=1; fpI=${GIT_CONFIG_COUNT:-0}; fpN=$(git -C "$r" config --local --name-only --get-regexp "^filter[.]" 2>/dev/null) || return 0; '
+  + 'fpIFS=$IFS; IFS="\n"; set -f; for fpK in $fpN; do fpK=${fpK#filter.}; fpK=${fpK%.*}; '
+  + 'for fpV in clean smudge process; do export "GIT_CONFIG_KEY_$fpI=filter.$fpK.$fpV" "GIT_CONFIG_VALUE_$fpI="; fpI=$((fpI+1)); done; '
+  + 'export "GIT_CONFIG_KEY_$fpI=filter.$fpK.required" "GIT_CONFIG_VALUE_$fpI=false"; fpI=$((fpI+1)); done; '
+  + 'set +f; IFS=$fpIFS; export GIT_CONFIG_COUNT=$fpI; }';
+export const GIT = FILTERS + '; g() { [ -n "$fpF" ] || fpF; git --no-optional-locks -c core.fsmonitor=false -c log.showSignature=false -c gpg.program=false -c core.quotepath=off -c diff.autoRefreshIndex=false -C "$r" "$@"; }';
 
 // $1 root (git -C, so a remote root works the same). Prints "<prefix of the root in its repo>\0" then the porcelain status.
 // Exit 4: no git; 5: not a work tree.
