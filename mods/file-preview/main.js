@@ -19,6 +19,7 @@ import { cell, reach, pointer, palette } from "./graph.js";
 import { Notes, noteKey, quoteOf, DRAG_PX } from "./annotate.js";
 import { sh, slash, localWindows, isWindows } from "./shell.js";
 import { cached, fit, isImage, kittyTerminal } from "./images.js";
+import { isHtml, htmlSegments } from "./html.js";
 
 const ICON = "mods/file-preview/icons/";
 const ROW = 22;              // tree row height
@@ -672,11 +673,13 @@ export default class FilePreview extends View {
       if (this.seq !== seq || this.ctx !== ctx) return;
       this.loadingFile = false;
       if (keep && doc.kind === "missing") { this.show(null); cx.notify(); return; }
+      // HTML: Reading (its elements as blocks, annotated like Markdown) or Source (the code view).
+      if (isHtml(rel) && doc.kind === "text" && !this.htmlSource) { doc.kind = "markdown"; doc.html = true; doc.segments = htmlSegments(doc.text); }
       if (doc.kind === "text") doc.lines = rowCount(doc.text);
       const prev = this.doc;
       if (prev && prev.kind === doc.kind && prev.text === doc.text && prev.message === doc.message && prev.truncated === doc.truncated && prev.src === doc.src) { cx.notify(); return; }
       if (doc.kind === "markdown") {
-        doc.segments = segment(doc.text);
+        if (!doc.html) doc.segments = segment(doc.text);
         // Cached PNGs become known before the first paint: no placeholder, no layout jump.
         const theme = themeOf(this.dark);
         await this.mermaid.prepare(doc.segments.filter((s) => s.kind === "code" && s.info.toLowerCase() === "mermaid").map((s) => cacheKey(s.text, theme)));
@@ -2350,12 +2353,29 @@ export default class FilePreview extends View {
     else if (doc.kind === "text" && this.code) body = this.codeView(t);
     else if (doc.kind === "image") body = this.imageView(doc, t, narrow);
     else body = this.message(t, doc.message ?? "Cannot preview this file");
+    if (doc && this.file && isHtml(this.file) && (doc.kind === "markdown" || doc.kind === "text")) body = v_flex().flex_1().min_h(0).child(this.htmlBar(t)).child(body);
     return v_flex().id("fp-preview-pane").flex_1().min_w(0).h_full().min_h(0).bg(t.surface)
       .track_focus(this.previewFocus).on_key_down((e, cx) => this.onKey(e, cx, "preview"))
       .key_context(DOC_CONTEXT).on_action(FIND_OPEN, (_e, cx) => this.openDocFind(cx))
       .when(Boolean(this.atCommit), (el) => el.child(this.atBanner(t)))
       .when(Boolean(this.ds), (el) => el.child(this.findBar("doc", t)))
       .child(body);
+  }
+
+  // ---- HTML ----
+
+  /** Reading | Source, over an HTML file. Comments are made in Reading and name source lines. */
+  htmlBar(t) {
+    const tab = (id, label, on, go) => h_flex().id(id).h(22).px(10).items_center().rounded(5).cursor_pointer()
+      .when(on, (e) => e.bg(t.selected).text_color(t.foreground)).when(!on, (e) => e.text_color(t.muted).hover((s) => s.bg(t.hover)))
+      .on_click(go).child(div().text_size(12).child(label));
+    const flip = (source) => (_e, cx) => { if (Boolean(this.htmlSource) === source) return; this.htmlSource = source; this.show(this.file, cx, { quiet: true }); cx.notify(); };
+    return h_flex().flex_none().w_full().h(34).px(12).gap(6).items_center().border_b(1).border_color(t.border)
+      .child(div().flex_none().text_size(11).text_color(t.dim).child("HTML"))
+      .child(tab("fp-html-read", "Reading", !this.htmlSource, flip(false)))
+      .child(tab("fp-html-src", "Source", Boolean(this.htmlSource), flip(true)))
+      .child(div().flex_1().min_w(0).truncate().text_right().text_size(11).text_color(t.dim)
+        .child(this.htmlSource ? "Comments are made in Reading" : "No CSS · drag or right-click an element to comment"));
   }
 
   // ---- images ----
