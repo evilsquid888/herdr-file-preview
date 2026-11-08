@@ -3,7 +3,7 @@
 // which doesn't trigger a mod reload.
 import { exec, home, appHome } from "herdr";
 import * as fs from "fs/promises";
-import { sh, slash, localWindows } from "./shell.js";
+import { sh, slash, localWindows, isWindows } from "./shell.js";
 
 // Set to an absolute mmdc path to skip the lookup (node beside it is used when present).
 const MMDC = "";
@@ -15,7 +15,50 @@ const TIMEOUT = 20000, KEEP = 200;
 const SIZES = "sizes.json", MAX_SIZES = 2 * KEEP;   // PNG sizes, so a re-render's placeholder has the final height
 
 export const MISSING = "Install @mermaid-js/mermaid-cli to render diagrams";
-export const NO_BROWSER = "Mermaid needs Google Chrome or Chromium";
+export const NO_BROWSER = "Mermaid needs Microsoft Edge, Google Chrome or Chromium";
+
+// Without mermaid-cli, a browser already on this machine draws the diagram with the mermaid.js
+// that ships in vendor/ (MIT): no npm, no puppeteer. Two runs of the headless browser:
+//   1. a page runs mermaid and reports the diagram's size; --dump-dom hands back its SVG
+//   2. a static page holding only that SVG is screenshotted at that size (a page still running
+//      scripts would be captured before mermaid has drawn)
+// The pages allow no network (a Content-Security-Policy), mermaid runs with securityLevel
+// "strict", and the browser gets its own profile in .cache/.
+const WIN_BROWSERS = [
+  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+];
+const MOD_DIR = () => appHome() + "/mods/file-preview/";
+const CSP_RENDER = "default-src 'none'; script-src file: 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:";
+const CSP_STATIC = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:";
+
+function renderPage(source, theme) {
+  const src = JSON.stringify(String(source)).replace(/</g, "\\u003c");
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP_RENDER}">
+<style>html,body{margin:0;padding:0;background:transparent}#d{display:inline-block;padding:8px}#s{position:absolute;left:-10000px}</style></head>
+<body><div id="d"></div><pre id="s"></pre>
+<script src="../vendor/mermaid.min.js"></script>
+<script>
+(function () {
+  var out = document.getElementById("s");
+  try {
+    mermaid.initialize({ startOnLoad: false, theme: ${JSON.stringify(theme)}, securityLevel: "strict" });
+    mermaid.render("m", ${src}).then(function (r) {
+      var d = document.getElementById("d"); d.innerHTML = r.svg;
+      var b = d.getBoundingClientRect();
+      out.textContent = "SIZE:" + Math.ceil(b.width) + "x" + Math.ceil(b.height);
+    }, function (e) { out.textContent = "ERR:" + String((e && e.message) || e); });
+  } catch (e) { out.textContent = "ERR:" + String((e && e.message) || e); }
+})();
+</script></body></html>`;
+}
+
+const staticPage = (svg) => `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP_STATIC}">
+<style>html,body{margin:0;padding:0;background:transparent}#d{display:inline-block;padding:8px}</style></head><body><div id="d">${svg}</div></body></html>`;
+
+const unescapeHtml = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
 
 const BROWSERS = [
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -88,7 +131,7 @@ export class Mermaid {
 
   /** Called once at copy start: LRU-ish by mtime (cache hits are touched). */
   prune() {
-    return sh(PRUNE, ["fp", dir(), String(KEEP)]).catch(() => {});
+    return sh(PRUNE, ["fp", slash(dir(), null), String(KEEP)]).catch(() => {});
   }
 
   /** A result already known this session, or null. */
@@ -163,6 +206,7 @@ export class Mermaid {
     if (done) { answer(done); return null; }
     const tool = await (this.tool ??= this.resolve());
     if (tool.error) { answer({ error: tool.error, setup: true }); return null; }
+    if (tool.kind === "browser") { await this.runBrowser(job, tool, answer); return null; }
     const base = dir() + job.key, png = base + ".png";
     await fs.writeFile(base + ".mmd", job.source);
     const args = [...tool.pre, "-i", base + ".mmd", "-o", png, "-t", job.theme, "-b", "transparent", "-s", String(job.scale ?? 2), "-q", "-p", tool.pp];
@@ -176,6 +220,30 @@ export class Mermaid {
     if (first.r.code !== 0) { answer({ error: trimError(first.r.stderr || first.r.stdout) }); return null; }
     answer((await this.load(job.key)) ?? { error: "mmdc finished without writing a PNG" });
     return null;
+  }
+
+  /** Option A: the browser draws it (see renderPage / staticPage). */
+  async runBrowser(job, tool, answer) {
+    const base = dir() + job.key, scale = job.scale ?? 2;
+    const native = (p) => (isWindows() ? p.replace(/\//g, "\\") : p);
+    const url = (p) => "file://" + (isWindows() ? "/" + p.replace(/\\/g, "/") : p);
+    const common = ["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+      "--disable-sync", "--mute-audio", "--hide-scrollbars", `--user-data-dir=${native(dir() + "browser-profile")}`];
+    await fs.mkdir(dir(), { recursive: true });
+    await fs.writeFile(base + ".html", renderPage(job.source, job.theme));
+    const fail = (e) => ({ code: -1, stdout: "", stderr: String(e?.message ?? e) });
+    const r1 = await exec(tool.browser, [...common, "--virtual-time-budget=15000", "--dump-dom", url(base + ".html")]).catch(fail);
+    const dom = r1.stdout ?? "";
+    const err = dom.match(/<pre id="s">ERR:([\s\S]*?)<\/pre>/);
+    if (err) { answer({ error: trimError(unescapeHtml(err[1])) }); return; }
+    const size = dom.match(/<pre id="s">SIZE:(\d+)x(\d+)<\/pre>/), svg = dom.match(/<svg[\s\S]*<\/svg>/)?.[0];
+    if (!size || !svg) { answer({ error: `The browser didn't draw the diagram${r1.code === -1 ? `: ${r1.stderr.slice(0, 200)}` : ""}` }); return; }
+    const w = Math.max(1, Number(size[1])), h = Math.max(1, Number(size[2]));
+    await fs.writeFile(base + ".svg.html", staticPage(svg));
+    const r2 = await exec(tool.browser, [...common, `--force-device-scale-factor=${scale}`, `--window-size=${w},${h}`,
+      "--default-background-color=00000000", `--screenshot=${native(base + ".png")}`, url(base + ".svg.html")]).catch(fail);
+    fs.unlink(base + ".html").catch(() => {}); fs.unlink(base + ".svg.html").catch(() => {});
+    answer((await this.load(job.key)) ?? { error: `The browser finished without writing a PNG${r2.code === -1 ? `: ${r2.stderr.slice(0, 200)}` : ""}` });
   }
 
   /** A PNG already in .cache/, with its size from IHDR; null when absent. */
@@ -202,14 +270,32 @@ export class Mermaid {
     }).catch(() => {});
   }
 
-  /** node + mmdc, then a browser for puppeteer. */
-  async resolve() {
-    let tool = MMDC ? await locate(MMDC) : null;
-    if (!tool && !NO_LOOKUP) tool = (await locate(home() + "/.local/share/fnm/aliases/default/bin/mmdc")) ?? (await locate("mmdc")) ?? (await viaShell());
-    if (!tool) return { error: MISSING };
+  /** A browser: Edge or Chrome on Windows, else the macOS / Linux lookup. "" when none. */
+  async browser() {
+    if (isWindows()) {
+      // Through Git for Windows' sh: Herdr's own fs may not look outside its folder.
+      for (const p of WIN_BROWSERS) {
+        const r = await sh('test -f "$1"', ["fp", p.split("\\").join("/")]).catch(() => null);
+        if (r?.code === 0) return p;
+      }
+      return "";
+    }
     const b = await sh(FIND_BROWSER, ["fp", ...BROWSERS]).catch(() => null);
-    const browser = b?.code === 0 ? b.stdout.trim().split("\n")[0] : "";
+    return b?.code === 0 ? b.stdout.trim().split("\n")[0] : "";
+  }
+
+  /** node + mmdc, then a browser for puppeteer; without mmdc, the browser alone (option A). */
+  async resolve() {
+    // Windows: no mmdc lookup (its scripts are POSIX); the browser renders.
+    let tool = isWindows() ? null : MMDC ? await locate(MMDC) : null;
+    if (!tool && !NO_LOOKUP && !isWindows()) tool = (await locate(home() + "/.local/share/fnm/aliases/default/bin/mmdc")) ?? (await locate("mmdc")) ?? (await viaShell());
+    const browser = await this.browser();
     if (!browser) return { error: NO_BROWSER };
+    if (!tool) {
+      if (!(await fs.exists(MOD_DIR() + "vendor/mermaid.min.js").catch(() => false))) return { error: MISSING };
+      await fs.mkdir(dir(), { recursive: true });
+      return { kind: "browser", browser };
+    }
     await fs.mkdir(dir(), { recursive: true });
     const pp = dir() + "puppeteer.json";
     await fs.writeFile(pp, JSON.stringify({ executablePath: browser, headless: "shell" }));
