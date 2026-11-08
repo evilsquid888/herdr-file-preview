@@ -3,6 +3,7 @@
 import { exec } from "herdr";
 import { GIT } from "./git.js";
 import { classify, LIMIT } from "./source.js";
+import { sh, slash, localWindows } from "./shell.js";
 
 export const PAGE = 300;
 export const MAX_DIFF = 3000, MAX_FILE_DIFF = 1000;   // diff lines shown per commit and per file
@@ -114,7 +115,7 @@ const failure = (r) => (r.code === 4 ? { error: "git is not installed" } : r.cod
  *  | { sig, head, commits, more }
  */
 export async function log(root, on, { skip = 0, count = PAGE, scope = "all" } = {}) {
-  const r = await exec("sh", ["-c", LOG, "fp", root, String(skip), String(count + 1), scope], { on }).catch(() => undefined);
+  const r = await sh(LOG, ["fp", root, String(skip), String(count + 1), scope], { on }).catch(() => undefined);
   if (!r) return undefined;
   if (r.code !== 0) return failure(r);
   const parts = r.stdout.split("\x01");
@@ -136,7 +137,7 @@ export async function log(root, on, { skip = 0, count = PAGE, scope = "all" } = 
 
 /** The refs checksum: changes with any commit, checkout, branch, tag or fetch. undefined when unreachable. */
 export async function signature(root, on) {
-  const r = await exec("sh", ["-c", SIG_ONLY, "fp", root], { on }).catch(() => undefined);
+  const r = await sh(SIG_ONLY, ["fp", root], { on }).catch(() => undefined);
   return r && r.code === 0 ? r.stdout.trim() : undefined;
 }
 
@@ -265,7 +266,7 @@ function patches(text, cutBytes) {
  *    files: [{ status, path, from, add, del, binary, diff: { lines, kinds, cut } | null }], truncated }
  */
 export async function show(root, on, sha, remotes = []) {
-  const r = await exec("sh", ["-c", SHOW, "fp", root, sha], { on }).catch(() => undefined);
+  const r = await sh(SHOW, ["fp", root, sha], { on }).catch(() => undefined);
   if (!r) return undefined;
   if (r.code === 4) return { error: "git is not installed" };
   const parts = r.stdout.split("\x01");
@@ -289,7 +290,7 @@ export async function show(root, on, sha, remotes = []) {
  * -> undefined (unreachable) | { error } | { status, path, from, add, del, binary, diff, truncated }
  */
 export async function change(root, on, section, e) {
-  const r = await exec("sh", ["-c", CHANGE, "fp", root, section, e.top, e.path, e.from ?? ""], { on }).catch(() => undefined);
+  const r = await sh(CHANGE, ["fp", root, section, e.top, e.path, e.from ?? ""], { on }).catch(() => undefined);
   if (!r) return undefined;
   if (r.code === 4) return { error: "git is not installed" };
   const parts = r.stdout.split("\x01"), nums = numstat(parts[0] ?? "");
@@ -303,7 +304,7 @@ export async function change(root, on, section, e) {
  * A file's content at a revision ("<sha>:<path>", path from the repo's top), shaped like readSource's result.
  */
 export async function readAt(root, on, rev, path) {
-  const r = await exec("sh", ["-c", CAT, "fp", root, `${rev}:${path}`], { on }).catch(() => undefined);
+  const r = await sh(CAT, ["fp", root, `${rev}:${path}`], { on }).catch(() => undefined);
   if (!r) return { kind: "error", message: "Cannot read this file (machine unreachable?)" };
   if (r.code === 5) return { kind: "missing", message: "This file is not in that commit" };
   if (r.code !== 0) return { kind: "error", message: (r.stderr || "Cannot read this file").trim().slice(0, 200) };

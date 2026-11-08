@@ -3,6 +3,7 @@
 // which doesn't trigger a mod reload.
 import { exec, home, appHome } from "herdr";
 import * as fs from "fs/promises";
+import { sh, slash, localWindows } from "./shell.js";
 
 // Set to an absolute mmdc path to skip the lookup (node beside it is used when present).
 const MMDC = "";
@@ -87,7 +88,7 @@ export class Mermaid {
 
   /** Called once at copy start: LRU-ish by mtime (cache hits are touched). */
   prune() {
-    return exec("sh", ["-c", PRUNE, "fp", dir(), String(KEEP)]).catch(() => {});
+    return sh(PRUNE, ["fp", dir(), String(KEEP)]).catch(() => {});
   }
 
   /** A result already known this session, or null. */
@@ -206,7 +207,7 @@ export class Mermaid {
     let tool = MMDC ? await locate(MMDC) : null;
     if (!tool && !NO_LOOKUP) tool = (await locate(home() + "/.local/share/fnm/aliases/default/bin/mmdc")) ?? (await locate("mmdc")) ?? (await viaShell());
     if (!tool) return { error: MISSING };
-    const b = await exec("sh", ["-c", FIND_BROWSER, "fp", ...BROWSERS]).catch(() => null);
+    const b = await sh(FIND_BROWSER, ["fp", ...BROWSERS]).catch(() => null);
     const browser = b?.code === 0 ? b.stdout.trim().split("\n")[0] : "";
     if (!browser) return { error: NO_BROWSER };
     await fs.mkdir(dir(), { recursive: true });
@@ -218,7 +219,7 @@ export class Mermaid {
 
 /** { cmd, pre } that runs mmdc, verified with --version; null when it doesn't run. */
 async function locate(path) {
-  const r = await exec("sh", ["-c", LOCATE, "fp", path]).catch(() => null);
+  const r = await sh(LOCATE, ["fp", path]).catch(() => null);
   if (!r || r.code !== 0) return null;
   const [mmdc, node] = r.stdout.split("\n");
   // node beside mmdc: no reliance on the shebang finding node on exec's minimal PATH.

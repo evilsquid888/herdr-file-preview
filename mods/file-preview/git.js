@@ -1,5 +1,6 @@
 // Git decorations, read-only: file status for the tree and changed lines for the document.
 import { exec } from "herdr";
+import { sh, slash, localWindows } from "./shell.js";
 
 // Reads that write nothing under .git (no index refresh, lock or fsmonitor cookie): the folder
 // watch would see the write and start the next refresh. quotepath=off keeps UTF-8 names raw.
@@ -33,7 +34,7 @@ const RANK = { "!": 3, M: 2, A: 1, U: 1 };
  * `from` from the repo's top; status a name-status letter) and a string that changes when any entry does.
  */
 export async function status(root, on) {
-  const r = await exec("sh", ["-c", STATUS, "fp", root], { on }).catch(() => undefined);
+  const r = await sh(STATUS, ["fp", root], { on }).catch(() => undefined);
   if (!r) return undefined;
   if (r.code !== 0) return null;
   const f = r.stdout.split("\0"), prefix = f[0], files = new Map(), folders = new Map();
@@ -73,7 +74,7 @@ const lineCount = (text) => (text ? text.split("\n").length - Number(text.endsWi
  * Lines from 1; a deletion n sits after line n (0: above the first).
  */
 export async function changes(root, rel, text, on) {
-  const r = await exec("sh", ["-c", DIFF, "fp", root, rel], { on }).catch(() => undefined);
+  const r = await sh(DIFF, ["fp", root, rel], { on }).catch(() => undefined);
   if (!r) return undefined;
   if (r.code !== 0) return null;
   const [st, head, diff = ""] = splitOnce(r.stdout);

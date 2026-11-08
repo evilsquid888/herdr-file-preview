@@ -17,6 +17,7 @@ import { rootKey, recall, snapshot, remember, forget } from "./memory.js";
 import * as hist from "./commits.js";
 import { cell, reach, pointer, palette } from "./graph.js";
 import { Notes, noteKey, quoteOf, DRAG_PX } from "./annotate.js";
+import { sh, slash, localWindows, isWindows } from "./shell.js";
 
 const ICON = "mods/file-preview/icons/";
 const ROW = 22;              // tree row height
@@ -79,7 +80,7 @@ function location() {
   const space = spaces().find((s) => s.active), f = focused();
   const pane = f?.pane ? panes().find((p) => p.pane === f.pane) : null;
   const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
-  return { cwd: pane?.cwd || f?.cwd || space?.folder || null, on };
+  return { cwd: slash(pane?.cwd || f?.cwd || space?.folder || null, on), on };
 }
 
 const ctxKey = (l) => JSON.stringify([l.cwd ?? null, l.on ?? null]);
@@ -109,12 +110,12 @@ const ancestors = (rel) => (rel ? rel.split("/").slice(0, -1).map((_, i, a) => a
 // The first context: a launcher's props, else the focused terminal, else (focus on a mod
 // pane, e.g. this panel right after its split) a terminal in the same tab.
 function initial(p) {
-  if (p?.cwd) return { cwd: p.cwd, on: p.on ?? null };
+  if (p?.cwd) return { cwd: slash(p.cwd, p.on ?? null), on: p.on ?? null };
   const f = focused();
   if (f && !f.terminal) {
     const space = spaces().find((s) => s.active);
     const term = panes().find((x) => x.tab === f.tab && x.terminal && x.cwd);
-    if (term) return { cwd: term.cwd, on: space?.machine ?? null };
+    if (term) return { cwd: slash(term.cwd, space?.machine ?? null), on: space?.machine ?? null };
   }
   return location();
 }

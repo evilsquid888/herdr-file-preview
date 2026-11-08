@@ -1,6 +1,7 @@
 // Search: the file list of a root (git or find, here or remote), fuzzy path matching, and
 // case-insensitive matches in the shown document.
 import { exec } from "herdr";
+import { sh, slash, localWindows } from "./shell.js";
 
 // Esc and cmd-f bound to these contexts outrank the app's bindings (Esc closes the popup).
 export const FIND_CONTEXT = "FilePreviewFind", FIND_ESCAPE = "file_preview_find_escape";
@@ -18,7 +19,7 @@ const LIST = 'cd "$1" 2>/dev/null || exit 2; ' +
 
 /** -> { paths, lower, base, source: "git" | "find", truncated }; rejects when it can't run. */
 export async function listFiles(root, on) {
-  const r = await exec("sh", ["-c", LIST, "fp", root], { on });
+  const r = await sh(LIST, ["fp", root], { on });
   if (r.code !== 0) throw new Error((r.stderr || "Cannot list the files").trim());
   const f = r.stdout.split("\0"), source = f[0] === "git" ? "git" : "find", max = source === "git" ? MAX_GIT : MAX_FIND;
   let truncated = r.stdout.length >= BYTES || (source === "find" && f.length - 2 >= MAX_FIND);

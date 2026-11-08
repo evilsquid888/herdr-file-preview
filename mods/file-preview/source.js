@@ -1,6 +1,7 @@
 // Reads one file for preview, here or on a remote machine.
 import { exec, readTextFile } from "herdr";
 import { isMarkdown } from "./lang.js";
+import { sh, slash, localWindows } from "./shell.js";
 
 export const LIMIT = 1000000; // characters shown; more is truncated with a notice
 
@@ -12,7 +13,7 @@ const STAT = 'stat -c "%Y %s" "$1" 2>/dev/null || stat -f "%m %z" "$1"';
 
 /** A cheap change stamp for polling: "<mtime> <size>", or "missing". Rejects when the machine is unreachable. */
 export async function stamp(path, on) {
-  const r = await exec("sh", ["-c", STAT, "fp", path], { on });
+  const r = await sh(STAT, ["fp", path], { on });
   return r.code === 0 ? r.stdout.trim() : "missing";
 }
 
@@ -44,14 +45,14 @@ export function classify(path, text, cut) {
 }
 
 async function probe(path, on) {
-  const r = await exec("sh", ["-c", PROBE, "fp", path], { on }).catch(() => null);
+  const r = await sh(PROBE, ["fp", path], { on }).catch(() => null);
   if (!r) return { kind: "error", message: "Cannot read this file (machine unreachable?)" };
   if (r.code === 3) return { kind: "error", message: "No permission to read this file" };
   const [size, n, m] = r.stdout.trim().split(/\s+/).map(Number);
   if (r.code !== 0 || !Number.isFinite(size)) return { kind: "error", message: (r.stderr || "Cannot read this file").trim().slice(0, 200) };
   if (n !== m) return { kind: "binary", message: "Binary file · no preview" };
   if (size <= LIMIT) return { kind: "binary", message: "Not UTF-8 text · no preview" };
-  const h = await exec("sh", ["-c", HEAD, "fp", path, String(LIMIT)], { on }).catch(() => null);
+  const h = await sh(HEAD, ["fp", path, String(LIMIT)], { on }).catch(() => null);
   if (!h || h.code !== 0) return { kind: "error", message: "Cannot read this file" };
   const out = classify(path, h.stdout, true);
   if (out.kind !== "binary") out.size = size;

@@ -1,5 +1,6 @@
 // Lazy folder tree, listed with one POSIX script here or on a remote machine.
 import { exec } from "herdr";
+import { sh, slash, localWindows } from "./shell.js";
 
 export const PER_FOLDER = 500, TOTAL = 5000;
 
@@ -8,7 +9,7 @@ const LIST = 'test -d "$1" || exit 2; { test -r "$1" && test -x "$1"; } || exit 
 
 async function directory(abs, on) {
   let r;
-  try { r = await exec("sh", ["-c", LIST, "fp", abs], { on }); }
+  try { r = await sh(LIST, ["fp", abs], { on }); }
   catch (e) {
     // exec rejects only when it cannot run at all: on a remote space, the machine is unreachable.
     const err = new Error(on ? `Cannot reach ${on}: ${String(e.message ?? e)}` : String(e.message ?? e));
