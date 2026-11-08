@@ -131,6 +131,30 @@ function normalize(path) {
   return "/" + out.join("/");
 }
 
+const DRIVE = /^[A-Za-z]:/;
+
+/** The folder above `p`: "/a/b" → "/a", "/a" → "/", "C:/dev" → "C:/"; a root returns itself. */
+export function parentDir(p) {
+  if (!p || p === "/" || /^[A-Za-z]:\/?$/.test(p)) return p && DRIVE.test(p) ? p.slice(0, 2) + "/" : p;
+  const q = p.replace(/\/+$/, ""), i = q.lastIndexOf("/");
+  if (i < 0) return p;
+  if (i === 0) return "/";
+  const up = q.slice(0, i);
+  return /^[A-Za-z]:$/.test(up) ? up + "/" : up;
+}
+
+/** The root's path as [{ label, path }], from the filesystem (or drive) root down. */
+export function crumbsOf(root) {
+  const drive = DRIVE.test(root) ? root.slice(0, 2) : "";
+  const out = [{ label: drive ? drive + "/" : "/", path: drive ? drive + "/" : "/" }];
+  let acc = drive;
+  for (const part of root.slice(drive.length).split("/").filter(Boolean)) {
+    acc += "/" + part;
+    out.push({ label: part, path: acc });
+  }
+  return out;
+}
+
 function ago(at) {
   const s = Math.max(0, Math.round((Date.now() - at) / 1000));
   return s < 5 ? "updated just now" : s < 60 ? `updated ${s}s ago` : s < 3600 ? `updated ${Math.floor(s / 60)} min ago` : `updated ${Math.floor(s / 3600)} h ago`;
@@ -172,6 +196,8 @@ export default class FilePreview extends View {
     this.overlay = p.overlay ?? null;
     this.mode = p.mode ?? "popup";
     this.pinned = Boolean(p.pin && p.cwd);   // opened on a given folder (a launcher): don't follow the focused terminal
+    this.pinnedByProps = this.pinned;
+    this.manualRoot = false;                 // the root was chosen by hand (breadcrumb, ↑, a folder): don't follow until ↺
     this.fromSide = p.from === "side" && Boolean(this.overlay);   // a popup opened from the side panel goes back to it
     this.zoom = null;       // the expanded diagram (Zoom), if any
     this.blocks = [];       // [{ kind: "md", text } | { kind: "code", info, lines, state }]
@@ -1159,6 +1185,10 @@ export default class FilePreview extends View {
     // Key names as commands (`file-preview.down`), so the tree can be driven without a keyboard.
     if (c === "reload") return this.reload(cx);
     if (c.startsWith("open:")) return this.reveal(c.slice(5), cx);
+    // The root by hand: up one folder, a given absolute folder, or back to following the terminal.
+    if (c === "root-up") return this.rootUp(cx);
+    if (c.startsWith("root:")) return this.setRoot(c.slice(5), cx);
+    if (c === "root-follow") return this.followTerminal(cx);
     // Same as each diagram notice's Retry.
     if (c === "retry-diagrams") { const b = this.blocks.find((b) => b.d?.setup) ?? this.blocks.find((b) => b.d?.error); if (b) this.retryDiagram(b, cx); return; }
     // Expanded diagram: expand:<n>, then zoom-in, zoom-out, zoom-fit, zoom-close (the + − 0 Esc keys).
@@ -1240,6 +1270,10 @@ export default class FilePreview extends View {
     else if (k === "r") this.reload(cx);
     else if (k === "b") this.toggleTree();
     else if (k === "g" && this.gitTabs()) this.setSide("commits", cx);
+    // "." makes the selected folder the root. (Not right-click: a mouse handler on a row inside the
+    // virtual list stops the whole list from drawing.)
+    else if ((k === "." || k === "period") && row?.dir && !row.denied) this.setRoot(this.tree.abs(row.path), cx);
+    else if (k === "backspace") this.rootUp(cx);
     else return false;
     cx.notify();
     return true;
@@ -1868,7 +1902,11 @@ export default class FilePreview extends View {
     return h_flex().h(28).flex_none().pl(4).pr(10).gap(6).items_center().border_b(1).border_color(t.border).bg(t.chrome)
       .when(!this.stacked(), (el) => el.child(this.button("fp-tree-bar", "sidebar.svg", t, (_e, cx) => { this.toggleTree(); cx.notify(); })))
       .child(this.button("fp-find-tree", "search.svg", t, (_e, cx) => this.openTreeFind(cx)))
-      .child(div().flex_1().min_w(0).truncate().text_size(12).child(tilde(this.tree.root) || "No folder"))
+      .when(Boolean(this.tree.root) && parentDir(this.tree.root) !== this.tree.root, (el) =>
+        el.child(this.textButton("fp-root-up", "↑", t, (_e, cx) => this.rootUp(cx)).tooltip("Up one folder (Backspace in the tree)")))
+      .child(this.breadcrumb(t))
+      .when(this.manualRoot, (el) => el.child(this.textButton("fp-root-follow", "↺", t, (_e, cx) => this.followTerminal(cx))
+        .tooltip("Follow the focused terminal's folder again")))
       .when(Boolean(on), (el) => el.child(div().flex_none().px(6).rounded(4).bg(t.raised).text_size(11)
         .text_color(this.tree.offline ? t.ansi3 : t.muted).child(this.tree.offline ? `${on} · offline` : on)))
       .when(Boolean(this.doc && (this.doc.kind === "markdown" || this.doc.kind === "text") && !this.commitShown()), (el) =>
@@ -1899,6 +1937,61 @@ export default class FilePreview extends View {
       .when(r.denied, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child("no access")))
       .when(Boolean(tint) && !r.dir, (el) => el.child(div().w(12).flex_none().text_center().text_size(11).font_medium().text_color(tint).child(g)))
       .when(Boolean(tint) && r.dir, (el) => el.child(h_flex().w(12).flex_none().justify_center().child(div().size(5).rounded_full().bg(tint))));
+  }
+
+  // ---- choosing the root by hand ----
+
+  /** The root's path as clickable folders: each one becomes the root; the last is where you are. */
+  breadcrumb(t) {
+    const root = this.tree.root;
+    if (!root) return div().flex_1().min_w(0).truncate().text_size(12).child("No folder");
+    const crumbs = crumbsOf(root);
+    const MAX = this.narrow() || this.mode === "side" ? 3 : 6;
+    const shown = crumbs.length > MAX ? crumbs.slice(-MAX) : crumbs, hidden = crumbs.length - shown.length;
+    const crumb = (c, k, last) => div().id(`fp-crumb-${k}`).flex_none().px(3).rounded(4).text_size(12)
+      .when(last, (e) => e.text_color(t.foreground).font_medium())
+      .when(!last, (e) => e.text_color(t.muted).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .on_click((_e, cx) => this.setRoot(c.path, cx)))
+      .child(c.label);
+    const sep = (k) => div().id(`fp-crumb-sep-${k}`).flex_none().text_size(11).text_color(t.dim).child("/");
+    const items = [];
+    if (hidden) items.push(div().id("fp-crumb-more").flex_none().px(3).rounded(4).text_size(12).text_color(t.muted).cursor_pointer()
+      .hover((s) => s.bg(t.hover)).tooltip(crumbs[hidden - 1].path).on_click((_e, cx) => this.setRoot(crumbs[hidden - 1].path, cx)).child("…"), sep("more"));
+    shown.forEach((c, k) => {
+      items.push(crumb(c, k, k === shown.length - 1));
+      if (k < shown.length - 1 && !c.label.endsWith("/")) items.push(sep(k));
+    });
+    return h_flex().id("fp-crumbs").flex_1().min_w(0).gap(1).items_center().overflow_hidden().tooltip(root).children(items);
+  }
+
+  /** Makes `abs` (on the same machine) the root, and stops following the terminal until ↺. */
+  setRoot(abs, cx) {
+    if (!abs || abs === this.tree.root) return;
+    const l = { cwd: abs, on: this.ctx?.on ?? null }, key = ctxKey(l);
+    this.manualRoot = true;
+    this.pinned = true;
+    this.ctxKey = key;
+    this.retarget(l, key, cx);
+    cx.notify();
+  }
+
+  rootUp(cx) {
+    const root = this.tree.root;
+    if (!root) return;
+    const up = parentDir(root);
+    if (up !== root) this.setRoot(up, cx);
+  }
+
+  /** Back to the focused terminal's folder (the one this view would follow). */
+  followTerminal(cx) {
+    this.manualRoot = false;
+    this.pinned = this.pinnedByProps;
+    const l = initial({});
+    if (!l.cwd && !l.on) { cx.notify(); return; }
+    const key = ctxKey(l), prev = this.ctxKey;
+    this.ctxKey = key;
+    if (key !== prev) this.retarget(l, key, cx);
+    cx.notify();
   }
 
   /** Stacked: over what the list opened, the way back to it. */

@@ -24,6 +24,12 @@ and Mermaid without mermaid-cli; everything else is the original's.
 - **Follows the focused terminal.** Focus another terminal or `cd`, and the root moves
   with it. Focusing the preview itself, or another mod, keeps the last root, so the
   panel doesn't jump when you click into it.
+- **Choose the root by hand.** The top bar shows the root as a breadcrumb: click any folder
+  in it to make that folder the root, up to `/` or a drive (`C:/`). **↑** (or `Backspace` in
+  the tree) goes up one folder, and `.` on a selected folder makes it the root. While you've
+  chosen a root, the preview stops following the terminal; **↺** follows it again. Commands:
+  `file-preview.root-up`, `file-preview.root:<absolute path>`, `file-preview.root-follow`
+  (bind them in `keys.json` if you like).
 - **Markdown**: CommonMark + GFM (tables, task lists, quotes, strikethrough, links).
   Relative links to `.md` files open inside the mod, and external links open in your
   browser (local spaces only). A paragraph that is only pictures (`![alt](shot.png)`,
@@ -406,6 +412,8 @@ Inside the mod:
 | `Enter` / `Space` | Open the file, or toggle the folder |
 | `Tab` | Switch focus between the tree and the preview (side panel: open the list's page, or go back to it) |
 | `r` | Reload the tree and the file |
+| `Backspace` | Root up one folder (tree focused) |
+| `.` | Make the selected folder the root (tree focused) |
 | `/` or `cmd-f` | Find a file (tree focused) or find in the document (preview focused) |
 | `n` / `shift-n` | Next / previous match while the document search is open (preview focused) |
 | `b` | Hide or show the file tree (popup) |

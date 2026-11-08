@@ -40,7 +40,8 @@ export class Tree {
     this.loaded = false;
   }
 
-  abs(rel) { return rel ? (this.root === "/" ? "/" : this.root + "/") + rel : this.root; }
+  // A root that ends in "/" (the filesystem root "/", a drive root "C:/") gets no second slash.
+  abs(rel) { return rel ? (this.root.endsWith("/") ? this.root : this.root + "/") + rel : this.root; }
 
   /** The root-relative path of an absolute one, or null when it is outside the root. */
   rel(abs) {

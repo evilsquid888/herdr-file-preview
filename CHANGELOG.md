@@ -19,6 +19,12 @@ so read its notes before updating.
 - Markdown prose is split into one block per paragraph (search frames and git marks are
   per paragraph too).
 
+### Navigation
+
+- Choose the root by hand: a clickable breadcrumb, **↑** / `Backspace` (up one folder), `.` (the
+  selected folder), **↺** (follow the terminal again), and `root-up` / `root:<path>` /
+  `root-follow` commands. Drive roots (`C:/`) work.
+
 ### New previews
 
 - Images: image files in the tree and pictures in Markdown / HTML, local and remote,
