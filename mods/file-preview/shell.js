@@ -11,7 +11,7 @@ const CANDIDATES = [
   "C:\\Program Files\\Git\\usr\\bin\\sh.exe",
   "C:\\Program Files (x86)\\Git\\usr\\bin\\sh.exe",
 ];
-let gitSh;   // undefined: not looked for yet; null: none
+let gitSh;   // the lookup: a Promise of the path, or of null when there is none
 
 export const isWindows = () => window()?.platform === "windows";
 /** Local on Windows: the folder of the focused terminal is a Windows path, and needs Git sh. */
@@ -20,14 +20,16 @@ export const localWindows = (on) => !on && isWindows();
 /** C:\dev\x → C:/dev/x (local Windows paths only; others are left alone). */
 export const slash = (p, on) => (localWindows(on) && typeof p === "string" ? p.replace(/\\/g, "/") : p);
 
-async function findGitSh() {
-  if (gitSh !== undefined) return gitSh;
-  gitSh = null;
-  for (const c of CANDIDATES) {
-    // `sh -c true` both proves the file exists and that it starts.
-    const r = await exec(c, ["-c", "true"]).catch(() => null);
-    if (r?.code === 0) { gitSh = c; break; }
-  }
+// Concurrent first calls share one lookup. A failed lookup is forgotten, so Retry looks again.
+function findGitSh() {
+  gitSh ??= (async () => {
+    for (const c of CANDIDATES) {
+      // `sh -c true` both proves the file exists and that it starts.
+      const r = await exec(c, ["-c", "true"]).catch(() => null);
+      if (r?.code === 0) return c;
+    }
+    return null;
+  })().then((found) => { if (!found) gitSh = undefined; return found; });
   return gitSh;
 }
 

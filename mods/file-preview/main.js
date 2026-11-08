@@ -18,6 +18,7 @@ import * as hist from "./commits.js";
 import { cell, reach, pointer, palette } from "./graph.js";
 import { Notes, noteKey, quoteOf, DRAG_PX } from "./annotate.js";
 import { sh, slash, localWindows, isWindows } from "./shell.js";
+import { cached, fit, isImage, kittyTerminal } from "./images.js";
 
 const ICON = "mods/file-preview/icons/";
 const ROW = 22;              // tree row height
@@ -248,6 +249,8 @@ export default class FilePreview extends View {
     });
     // "updated N s ago" in the status bar; nothing to redraw without a file.
     cx.timer.every(5000, (cx) => { if (this.file && this.loadedAt) cx.notify(); });
+    // Pictures a render asked for (picsBlock): copied into the cache here, outside render.
+    cx.timer.every(250, (cx) => this.drainPics(cx));
   }
 
   initDiagram(p, cx) {
@@ -664,19 +667,19 @@ export default class FilePreview extends View {
     const ctx = this.ctx, abs = this.tree.abs(rel);
     cx.spawn(async (cx) => {
       let doc;
-      try { doc = read ? await read() : await readSource(abs, ctx.on); }
+      try { doc = read ? await read() : isImage(rel) ? await this.readImage(abs, ctx.on) : await readSource(abs, ctx.on); }
       catch (e) { doc = { kind: "error", message: String(e.message ?? e) }; }
       if (this.seq !== seq || this.ctx !== ctx) return;
       this.loadingFile = false;
       if (keep && doc.kind === "missing") { this.show(null); cx.notify(); return; }
       if (doc.kind === "text") doc.lines = rowCount(doc.text);
       const prev = this.doc;
-      if (prev && prev.kind === doc.kind && prev.text === doc.text && prev.message === doc.message && prev.truncated === doc.truncated) { cx.notify(); return; }
+      if (prev && prev.kind === doc.kind && prev.text === doc.text && prev.message === doc.message && prev.truncated === doc.truncated && prev.src === doc.src) { cx.notify(); return; }
       if (doc.kind === "markdown") {
         doc.segments = segment(doc.text);
         // Cached PNGs become known before the first paint: no placeholder, no layout jump.
         const theme = themeOf(this.dark);
-        await this.mermaid.prepare(doc.segments.filter((s) => s.kind !== "md" && s.info.toLowerCase() === "mermaid").map((s) => cacheKey(s.text, theme)));
+        await this.mermaid.prepare(doc.segments.filter((s) => s.kind === "code" && s.info.toLowerCase() === "mermaid").map((s) => cacheKey(s.text, theme)));
         if (this.seq !== seq || this.ctx !== ctx) return;
       }
       this.doc = doc;
@@ -2339,11 +2342,13 @@ export default class FilePreview extends View {
             .children((() => {
               const placed = this.notes.place(this.noteKey(), this.blocks).at;
               return this.blocks.map((b, i) => b.kind === "md"
-                ? this.annotated(b, i, t, placed[i] ?? [], this.marked(b, t, this.aimable(i,
-                  TextView.markdown(`md-${i}`, this.markedText(b, t)).selectable(true).on_link_click((url, cx) => this.link(url, cx)))))
+                ? this.annotated(b, i, t, placed[i] ?? [], this.marked(b, t, this.aimable(i, b.pics ? this.picsBlock(b, i, t)
+                  : b.html ? TextView.html(`html-${i}`, b.text).selectable(true).on_link_click((url, cx) => this.link(url, cx))
+                  : TextView.markdown(`md-${i}`, this.markedText(b, t)).selectable(true).on_link_click((url, cx) => this.link(url, cx)))))
                 : this.marked(b, t, b.kind === "mmd" ? this.diagramBlock(b, i, t) : this.codeBlock(b, i, t)));
             })()))));
     else if (doc.kind === "text" && this.code) body = this.codeView(t);
+    else if (doc.kind === "image") body = this.imageView(doc, t, narrow);
     else body = this.message(t, doc.message ?? "Cannot preview this file");
     return v_flex().id("fp-preview-pane").flex_1().min_w(0).h_full().min_h(0).bg(t.surface)
       .track_focus(this.previewFocus).on_key_down((e, cx) => this.onKey(e, cx, "preview"))
@@ -2351,6 +2356,90 @@ export default class FilePreview extends View {
       .when(Boolean(this.atCommit), (el) => el.child(this.atBanner(t)))
       .when(Boolean(this.ds), (el) => el.child(this.findBar("doc", t)))
       .child(body);
+  }
+
+  // ---- images ----
+
+  /** An image file as a doc: copied into the cache (images.js), with its size. */
+  async readImage(abs, on) {
+    const r = await cached(abs, on);
+    return r.error ? { kind: "error", message: r.error } : { kind: "image", ...r };
+  }
+
+  /** The preview's inner width, for fitting pictures (fp-col reports it; the image view too). */
+  fitWidth() { return Math.max(120, (this.colW ?? 720)); }
+
+  imageView(doc, t, narrow) {
+    const remote = Boolean(this.ctx?.on), z = this.textZoom ?? 1;
+    const size = fit(doc.w, doc.h, this.fitWidth(), Infinity, z);
+    const kb = doc.bytes >= 1048576 ? `${(doc.bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(doc.bytes / 1024))} KB`;
+    return v_flex().id(`img:${this.file}`).flex_1().min_h(0)
+      .child(h_flex().flex_none().w_full().h(34).px(12).gap(10).items_center().border_b(1).border_color(t.border).bg(t.raised)
+        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(`${doc.w} × ${doc.h} · ${kb}${size.w < doc.w ? ` · shown at ${Math.round((size.w / doc.w) * 100)} %` : ""}`))
+        .when(remote, (e) => e.child(h_flex().id("fp-img-kitty").h(24).flex_none().px(10).items_center().rounded(5).cursor_pointer()
+          .border_1().border_color(t.border).text_color(t.muted).hover((s) => s.bg(t.hover))
+          .tooltip(`Shows it in a terminal on ${this.ctx.on} with Kitty graphics, like yazi: nothing copied`)
+          .on_click((_e, cx) => this.viewOverSsh(cx)).child(div().text_size(12).child("View over SSH")))))
+      .child(div().id(`img-scroll:${this.file}`).flex_1().min_h(0).overflow_y_scrollbar()
+        .child(h_flex().w_full().justify_center().px(narrow ? 12 : 24).py(narrow ? 12 : 20)
+          .on_size_change((box, cx) => { const w = Math.round(box.width) - (narrow ? 24 : 48); if (w > 0 && w !== this.colW) { this.colW = w; cx.notify(); } })
+          .child(image(doc.src).w(size.w).h(size.h).flex_none())));
+  }
+
+  /** The open remote image, printed with Kitty graphics in a short-lived terminal there. */
+  viewOverSsh(cx) {
+    const on = this.ctx?.on, abs = this.file && this.tree.abs(this.file);
+    if (!on || !abs) return;
+    this.noteStatus = { text: `Opening ${this.file.split("/").pop()} on ${on}…`, until: Date.now() + 3000 };
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        const terminal = await kittyTerminal(abs, on);
+        openOverlay({ kind: "dialog", width: 0.85, height: 0.85, layout: { id: "fp-kitty", type: "column", children: [{ id: "fp-kitty-term", type: "block", terminal }] } });
+      } catch (e) {
+        this.noteStatus = { text: `View over SSH failed: ${String(e?.message ?? e).split("\n")[0]}`, until: Date.now() + 6000 };
+        cx.notify();
+      }
+    });
+  }
+
+  drainPics(cx) {
+    const q = this.picQueue;
+    if (!q?.length) return;
+    this.picQueue = [];
+    for (const { key, abs, on } of q) cx.spawn(async (cx) => {
+      const r = await cached(abs, on).catch((e) => ({ error: String(e?.message ?? e) }));
+      this.pics?.set(key, r);
+      cx.notify();
+    });
+  }
+
+  /** Pictures embedded in Markdown (a paragraph that is only pictures), from the file's folder. */
+  picsBlock(b, i, t) {
+    this.pics ??= new Map();   // abs (or url) -> { loading } | { src, w, h } | { error }
+    const dirOf = this.file.includes("/") ? this.file.slice(0, this.file.lastIndexOf("/")) : "";
+    const items = b.pics.map((p) => {
+      const src = p.src.trim();
+      if (/^(https?:|data:|mailto:)/i.test(src)) return { p, key: src, state: { error: "Web image (not fetched)" } };
+      const rel = normalize(src.startsWith("/") ? src.slice(1) : (dirOf ? `${dirOf}/` : "") + decodeURIComponent(src.split(/[?#]/)[0]));
+      const abs = src.startsWith("/") ? src : this.tree.abs(rel.slice(1));
+      return { p, key: `${this.ctx?.on ?? ""}|${abs}`, abs };
+    });
+    for (const it of items) {
+      if (it.state || this.pics.has(it.key)) continue;
+      this.pics.set(it.key, { loading: true });
+      const on = this.ctx?.on ?? null, key = it.key, abs = it.abs;
+      (this.picQueue ??= []).push({ key, abs, on });
+    }
+    const w = this.fitWidth(), z = this.textZoom ?? 1;
+    return v_flex().id(`pics-${i}`).w_full().gap(8).items_center().children(items.map((it, k) => {
+      const s = it.state ?? this.pics.get(it.key);
+      if (s?.src) { const d = fit(s.w, s.h, w, Infinity, z); return div().id(`pic-${i}-${k}`).flex_none().child(image(s.src).w(d.w).h(d.h)); }
+      return h_flex().id(`pic-${i}-${k}`).w_full().px(10).py(8).gap(8).items_center().rounded(6).border_1().border_color(t.border).bg(t.raised)
+        .child(div().flex_none().text_size(12).text_color(t.dim).child("🖼"))
+        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(it.p.alt || it.p.src))
+        .child(div().flex_none().text_size(11).text_color(s?.error ? t.ansi1 : t.dim).child(s?.error ?? "Loading…"));
+    }));
   }
 
   // ---- annotations ----

@@ -18,7 +18,10 @@ export function segment(source) {
     const text = prose.join("\n");
     prose = [];
     if (!text.trim()) return;
-    for (const c of paragraphs(text)) out.push({ kind: "md", text: c.text, start: from + c.line + 1, end: from + c.line + c.text.split("\n").length });
+    for (const c of paragraphs(text)) {
+      const pics = picturesOf(c.text);
+      out.push({ kind: "md", text: c.text, start: from + c.line + 1, end: from + c.line + c.text.split("\n").length, ...(pics ? { pics } : {}) });
+    }
   };
   for (let i = 0; i < lines.length; i++) {
     const m = OPEN.exec(lines[i]);
@@ -35,6 +38,27 @@ export function segment(source) {
   }
   flush();
   return out;
+}
+
+/**
+ * A paragraph that is only pictures (`![alt](src "title")`, `<img src=…>`, links around them):
+ * [{ alt, src }], drawn as images instead of TextView's alt text. Anything else: null.
+ */
+const MD_PIC = /!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+["'][^"']*["'])?\s*\)/g;
+const HTML_PIC = /<img\b[^>]*>/gi;
+export function picturesOf(text) {
+  const pics = [];
+  for (const m of text.matchAll(MD_PIC)) pics.push({ alt: m[1], src: m[2], at: m.index });
+  for (const m of text.matchAll(HTML_PIC)) {
+    const src = m[0].match(/\bsrc\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (src) pics.push({ alt: m[0].match(/\balt\s*=\s*["']([^"']*)["']/i)?.[1] ?? "", src, at: m.index });
+  }
+  if (!pics.length) return null;
+  // What's left once the pictures (and links / <a>, <p>, <div>, <br> wrapped around them) go: only space.
+  const rest = text.replace(MD_PIC, "").replace(HTML_PIC, "")
+    .replace(/\[\s*\]\([^)]*\)/g, "").replace(/<\/?(a|p|div|br|center|span)\b[^>]*>/gi, "");
+  if (rest.trim()) return null;
+  return pics.sort((a, b) => a.at - b.at).map(({ alt, src }) => ({ alt, src }));
 }
 
 function stripIndent(line, n) {
