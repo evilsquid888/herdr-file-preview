@@ -246,9 +246,9 @@ export class Mermaid {
     const dom = r1.stdout ?? "";
     mlog(`dump-dom ${job.key}: code ${r1.code}, ${dom.length} chars, stderr ${JSON.stringify(String(r1.stderr ?? "").slice(-300))}`);
     const err = dom.match(/<pre id="s">ERR:([\s\S]*?)<\/pre>/);
-    if (err) { answer({ error: trimError(unescapeHtml(err[1])) }); return; }
+    if (err) { mlog(`mermaid error ${job.key}: ${unescapeHtml(err[1]).split(String.fromCharCode(10))[0].slice(0, 200)}`); answer({ error: trimError(unescapeHtml(err[1])) }); return; }
     const size = dom.match(/<pre id="s">SIZE:(\d+)x(\d+)<\/pre>/), svg = dom.match(/<svg[\s\S]*<\/svg>/)?.[0];
-    if (!size || !svg) { answer({ error: `The browser didn't draw the diagram${r1.code === -1 ? `: ${r1.stderr.slice(0, 200)}` : ""}` }); return; }
+    if (!size || !svg) { mlog(`no drawing ${job.key}: size ${Boolean(size)}, svg ${Boolean(svg)}`); answer({ error: `The browser didn't draw the diagram${r1.code === -1 ? `: ${r1.stderr.slice(0, 200)}` : ""}` }); return; }
     const w = Math.max(1, Number(size[1])), h = Math.max(1, Number(size[2]));
     await fs.writeFile(base + ".svg.html", staticPage(svg));
     const r2 = await exec(tool.browser, [...common, `--force-device-scale-factor=${scale}`, `--window-size=${w},${h}`,
