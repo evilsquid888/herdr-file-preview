@@ -7,6 +7,35 @@ Versions follow [Semantic Versioning](https://semver.org/): a major version chan
 something you set up yourself (a mod or layout name, a shortcut, a `keys.json` entry),
 so read its notes before updating.
 
+## 1.1.0 — 2026-11-07 (evilsquid888 fork)
+
+### Comments
+
+- Comment on a paragraph (drag across it, or right-click): edit, delete, kept per machine
+  and file in `~/.config/herdr-app/data/file-preview/comments.json`, and found again
+  after the file changes.
+- **Send to agent** pastes the comments as numbered Markdown into the prompt of the
+  agent in the shown tab, without Enter, for review there; **Copy** and **Clear**.
+- Markdown prose is split into one block per paragraph (search frames and git marks are
+  per paragraph too).
+
+### New previews
+
+- Images: image files in the tree and pictures in Markdown / HTML, local and remote,
+  copied into the cache; **View over SSH** prints a remote image with Kitty graphics.
+- HTML: a **Reading** view (elements as blocks you can comment on) and a **Source** view.
+- Mermaid without mermaid-cli: Edge, Chrome or Chromium with the bundled mermaid.js.
+
+### Windows
+
+- Local folders through Git for Windows' `sh`; CRLF files read correctly.
+
+### Security
+
+- Pictures in documents load only when they are image files under the browsed folder.
+- Git calls never verify signatures (`log.showSignature=false`, `gpg.program=false`), so a
+  repository's own config can't name a program for git to run.
+
 ## 1.0.0 — 2026-11-06
 
 First tagged version.

@@ -1,12 +1,20 @@
 # file-preview
 
 A [Herdr](https://herdr.dev) layout (`main-fp`) and the mods behind it: a file tree of the
-focused terminal's folder next to a rendered preview of the selected file: Markdown with highlighted code fences
-and Mermaid diagrams, plus syntax-highlighted source files. It works in local and remote
-spaces, reloads live while agents edit files, and opens as a side panel on the right of
-the window (a Preview button next to Files and Changes) or as a near-full-screen popup.
+focused terminal's folder next to a rendered preview of the selected file: Markdown with highlighted code fences,
+Mermaid diagrams and pictures, HTML, images, plus syntax-highlighted source files. You can
+**comment on paragraphs and hand the comments to the agent in that tab** as a draft to
+review. It works in local and remote spaces, on macOS, Linux and Windows, reloads live
+while agents edit files, and opens as a side panel on the right of the window (a Preview
+button next to Files and Changes) or as a near-full-screen popup.
+
+This is a fork of [bborrero14/herdr-file-preview](https://github.com/bborrero14/herdr-file-preview)
+(MIT). The fork adds paragraph comments with Send to agent, images, HTML, Windows support
+and Mermaid without mermaid-cli; everything else is the original's.
 
 ![file-preview in the side panel next to a terminal, showing a Markdown file with a Mermaid diagram, a code fence and a table](preview-panel.png)
+
+![The popup on a Markdown file with two paragraph comments, the comments bar with Send to agent, Copy and Clear, and rendered Mermaid diagrams](preview-annotations.png)
 
 ## Features
 
@@ -18,13 +26,67 @@ the window (a Preview button next to Files and Changes) or as a near-full-screen
   panel doesn't jump when you click into it.
 - **Markdown**: CommonMark + GFM (tables, task lists, quotes, strikethrough, links).
   Relative links to `.md` files open inside the mod, and external links open in your
-  browser (local spaces only). Embedded images show as their alt text.
+  browser (local spaces only). A paragraph that is only pictures (`![alt](shot.png)`,
+  `<img src=…>`) shows them as images; see **Images**.
+- **Paragraph comments.** Drag across a paragraph (a heading, a list, a table, a picture)
+  and click **+ Comment**, or right-click it. Type, then **Ctrl/Cmd+Enter** or **Comment**.
+  A commented paragraph gets a bar in the margin and its comments under it, each with
+  **✎** (edit) and **✕** (delete). Comments belong to a paragraph, not to selected words:
+  Herdr gives a mod no access to the text you select. They are kept on this computer in
+  `~/.config/herdr-app/data/file-preview/comments.json`, per machine and file, with the
+  paragraph's text and first line, so they find their paragraph again after the file is
+  edited (a paragraph that's gone keeps its comment, marked as such in the feedback).
+- **Send to agent: a draft you review.** A bar over a commented file shows the count and
+  three buttons:
+  - **Send to agent (N)** pastes the comments into the prompt of the agent in the shown
+    tab (on the file's machine), **without pressing Enter**, so you read and edit them
+    there first. With several agents there, a small picker asks which; with none, use Copy.
+    It works through the clipboard (copy, focus that terminal, paste), so the feedback
+    stays on the clipboard. Comments sent this way are dimmed with **✓ drafted**, and the
+    next Send carries only the new ones.
+  - **Copy** puts the same feedback on the clipboard.
+  - **Clear** deletes the file's comments.
+
+  The feedback is numbered Markdown, in document order:
+
+  ```markdown
+  # Feedback on README.md
+
+  File: spark:/home/me/project/README.md
+  2 comments. Each one is about the quoted paragraph.
+
+  ## Annotation 1 — README.md (line 8, section "Install")
+  Comment on: "Copy the mods into Herdr. Copy them; don't symlink."
+  > Say why symlinks break the icons.
+  ```
+- **Images.** Image files in the tree (PNG, JPEG, GIF, WebP, SVG, BMP, ICO) show fitted to
+  the preview, with their size, local or remote. Pictures inside Markdown and HTML show in
+  place too, but only image files under the folder you browse: a document can't make the
+  mod read anything else. A picture is copied once into the mod's cache (remote ones
+  through herdr-core as base64, nothing else to set up) and its size comes from its header.
+  Web images aren't fetched.
+  - **View over SSH** (remote image files): shows the picture the way terminal file
+    managers like yazi do, with Kitty graphics in a short-lived terminal on that machine,
+    so nothing is copied. PNG needs only `python3` there; other formats need `chafa` or
+    ImageMagick. Enter closes it.
+- **HTML**: `.html` files open in a **Reading** view: the page's elements (headings,
+  paragraphs, lists, tables, pictures) as blocks you can comment on, like Markdown, and
+  the feedback names their source lines. Scripts, styles and comments are left out, and
+  layout wrappers (`<div id="app">`, `<main>`, …) are opened up. Herdr draws HTML without
+  CSS, so you see the page's text and structure, not its design. **Source** shows the code.
+
+  ![The Reading view of an HTML file: a heading, a commented paragraph, a list and a table](preview-html.png)
+- **Windows**: local folders work through Git for Windows' `sh` (its `stat`, `find`,
+  `head` and `git`), which the mod finds by itself; remote folders work as from macOS.
+  Windows line endings (CRLF) are read correctly.
 - **Highlighted code fences** in Markdown, one read-only editor per fence, sized to
   its text. Each fence has a header with its language and a **copy button** that puts
   the fence's content on the clipboard ("Copied" confirms it). The wheel over a fence
   scrolls the document, not the fence.
-- **Mermaid diagrams**: ` ```mermaid ` fences are rendered to PNG locally with
-  mermaid-cli and cached. If mermaid-cli or a browser is missing, you see the diagram
+- **Mermaid diagrams**: ` ```mermaid ` fences are rendered to PNG locally and cached:
+  with mermaid-cli when it's installed, otherwise with a browser already on the machine
+  (Edge, Chrome or Chromium) and the mermaid.js that ships with the mod, so nothing needs
+  installing (always the browser on Windows). If neither works, you see the diagram
   source with a notice and a Retry button.
 - **Expanded diagrams**: the expand button in a diagram's top-right corner opens it
   fitted to the whole view, with zoom (`+`, `-`, `0` for fit), the zoom level and
@@ -171,10 +233,16 @@ the window (a Preview button next to Files and Changes) or as a near-full-screen
 
 ## Requirements
 
-- **Herdr app** on macOS or Linux. Remote spaces need a Unix machine with `sh` and `stat`.
+- **Herdr app** on macOS, Linux or Windows. Remote spaces need a Unix machine with `sh`
+  and `stat`.
+- **Windows, for local folders:** [Git for Windows](https://git-scm.com/download/win)
+  (its `sh.exe` in `C:\Program Files\Git\usr\bin`). Remote folders don't need it.
 - **Optional, for git change marks and the commit history:** `git` on the machine that holds
   the files (2.31 or later for merge diffs against the first parent).
-- **Optional, for Mermaid diagrams:**
+- **Optional, for Mermaid diagrams:** either of
+  - **Nothing to install**: Microsoft Edge, Google Chrome or Chromium on this machine. The
+    mod draws diagrams with it and its own `vendor/mermaid.min.js` (mermaid 12.3.0, MIT).
+    This is the only way on Windows, and the fallback elsewhere.
   - [`@mermaid-js/mermaid-cli`](https://github.com/mermaid-js/mermaid-cli) (`mmdc`):
     `npm install -g @mermaid-js/mermaid-cli`
   - **Google Chrome or Chromium** (Brave and Edge also work). `mmdc` installs no
@@ -193,21 +261,48 @@ the window (a Preview button next to Files and Changes) or as a near-full-screen
   >
   > With nvm, volta or another manager, set `MMDC` to the absolute path of `mmdc`.
 
-Without mermaid-cli everything else works, and diagrams appear as source code.
+Without mermaid-cli and without a browser everything else works, and diagrams appear as
+source code.
 
 ### What the mod runs and reads
 
 As the herdr.dev guidance asks, here is what the mod does outside its own folder:
 
-- It **runs programs** with `exec`: `sh` (folder listings, `stat`, file probes, and
-  read-only `git rev-parse`, `git status`, `git diff`, `git log`, `git show`,
-  `git cat-file` and `git for-each-ref`, which never write under `.git`),
-  `node` with `mmdc`, which starts headless Chrome, and `open` or `xdg-open` for links
-  you click. Login shells are only used to look up `mmdc`.
+- It **runs programs** with `exec`: `sh` (folder listings, `stat`, file probes, `base64`
+  and `cp` for pictures, and read-only `git rev-parse`, `git status`, `git diff`,
+  `git log`, `git show`, `git cat-file` and `git for-each-ref`, which never write under
+  `.git`); on Windows that `sh` is Git for Windows' own. For Mermaid: `node` with `mmdc`,
+  which starts headless Chrome, or a headless Edge / Chrome directly. `open` or `xdg-open`
+  for links you click. Login shells are only used to look up `mmdc`.
+- **Only when you ask:** **Send to agent** copies the feedback to the clipboard, focuses
+  the agent's terminal and pastes it (never Enter); **View over SSH** starts a terminal on
+  that machine (`hc run`) that prints the picture with `python3`, `chafa` or ImageMagick.
 - It **reads files anywhere** under the folder you browse, on local or remote machines.
 - It **writes only** to `~/.config/herdr-app/mods/file-preview/.cache/` (rendered
-  diagrams and the puppeteer config).
+  diagrams, cached pictures, the puppeteer config and the browser's profile) and
+  `~/.config/herdr-app/data/file-preview/comments.json` (your comments).
 - It makes **no network requests**: no content leaves your machine.
+
+### Security
+
+Opening a file never runs it and never installs anything. What a hostile file could
+still reach, and how the mod keeps it out:
+
+- **Git**: a folder can carry its own `.git/config` (a downloaded folder can; `git clone`
+  doesn't copy it). Every git call forces `core.fsmonitor=false`,
+  `log.showSignature=false` and `gpg.program=false`, and diffs use `--no-ext-diff
+  --no-textconv`, so that config can't name a program for git to run.
+- **Markdown and HTML** are drawn by Herdr's own renderer: no JavaScript, no CSS, no
+  network. Links open only when you click them.
+- **Pictures in documents** load only when they are image files under the folder you
+  browse, so `![x](/home/you/.ssh/id_ed25519)` doesn't copy your key into the cache.
+- **Mermaid** is the one place a file's text reaches a JavaScript engine, automatically:
+  mermaid runs with `securityLevel: "strict"` in a headless browser with its own profile,
+  on pages whose Content-Security-Policy allows no network and no file reads.
+- **View over SSH** on a non-PNG image runs `chafa` or ImageMagick, which have had bugs
+  with crafted images: use it on pictures you trust.
+- **Send to agent** quotes each paragraph's first line, which a file could word to steer
+  the agent. It's a draft: read it before you press Enter.
 
 ## Install
 
@@ -262,7 +357,10 @@ again finds the names taken and installs a renamed second copy next to yours.
   three mod folders and `layouts/main-fp.json` in place.
 - **With Herdr's agent:** ask it to *replace* the installed `file-preview`,
   `file-preview-panel`, `tabs-fp` and `layouts/main-fp.json` with the ones from
-  `https://github.com/bborrero14/herdr-file-preview`, keeping the names.
+  `https://github.com/evilsquid888/herdr-file-preview`, keeping the names.
+- **On Windows** (no `rsync`): copy `mods/file-preview`, `mods/file-preview-panel` and
+  `mods/tabs-fp` over the folders in `%USERPROFILE%\.config\herdr-app\mods\`, leaving out
+  `jsconfig.json` and `gpui-kit.d.ts`, and `layouts/main-fp.json` into `layouts\`.
 
 Your shortcuts, panel widths, zoom levels and remembered files survive an update: they
 live in `keys.json` and Herdr's state, not in the mod folders. If a version's notes list
@@ -278,6 +376,22 @@ keep your version.
 |---|---|
 | `cmd-e` | Open or close the side panel (the Preview button's hover shows this key) |
 | `cmd-shift-e` | Open or close the popup |
+
+On Windows and Linux, `ctrl-e` and `ctrl-shift-e` often mean something already (end of
+line in shells, Herdr's split down), so pick free keys there, for example:
+
+```json
+{ "global": { "alt-e": "mod.open:file-preview-panel", "alt-shift-e": "mod.open:file-preview" } }
+```
+
+Comments:
+
+| Action | How |
+|---|---|
+| Comment on a paragraph | Drag across it, then **+ Comment**; or right-click it |
+| Save a comment | `ctrl-Enter` / `cmd-Enter`, or **Comment** (Enter makes a new line) |
+| Edit / delete a comment | **✎** / **✕** on it |
+| Hand the comments to the agent | **Send to agent** (a draft in its prompt: you press Enter) |
 
 Inside the mod:
 
@@ -339,19 +453,22 @@ as the popup) and close. An expanded diagram's bar has zoom out, zoom in, fit an
   virtual lists from a script, not the document, so the find bar and status bar tell you
   the match, line and section of the current one instead. Words are highlighted only in
   Markdown prose (through `<mark>`); editors expose no highlight or selection API, so code
-  fences and code files get per-line marks. A long prose run between two fences is one
-  block, so its frame can be tall.
+  fences and code files get per-line marks. The current match's paragraph gets a frame.
 - File search lists at most 50,000 files in a git repository and 20,000 elsewhere.
 - Leaving an expanded diagram in the popup puts the document back at its top: Herdr
   can't read or restore a scroll position.
 - **The popup's memory doesn't keep the document's scroll position**, for the same
   reason: a reopened file starts at its top. Searches aren't remembered either.
-- macOS and Linux only; remote spaces must be Unix. **Windows is not supported.**
-- Mermaid needs Chrome or Chromium on the local machine. Each diagram renders once
-  (about 1 s warm, about 5 s cold) and is cached by content and theme.
-- **Git marks on Markdown are per block.** All prose between two fences is one block, so
-  its bar covers the whole run even when one line changed. A deletion inside a block
-  shows at the block's top.
+- Remote spaces must be Unix. Local folders on Windows need Git for Windows.
+- Mermaid needs Chrome, Chromium or Edge on the local machine. Each diagram renders once
+  (about 1–2 s; with mermaid-cli about 1 s warm, 5 s cold) and is cached by content and theme.
+- **Git marks on Markdown are per paragraph**: a deletion inside a paragraph shows at its top.
+- **Comments are per paragraph, not per word**: Herdr gives a mod no access to the
+  selected text. The Source view of an HTML file takes no comments (make them in Reading).
+- **Send to agent pastes, it doesn't type**: Claude Code may fold a long paste into
+  `[Pasted text +N lines]`; read the comments in the bar first, or use Copy.
+- **Pictures** are copied up to 6 MB each; only a paragraph made only of pictures shows
+  them (a picture inside a sentence or a table cell stays alt text).
 - **Code files over 1,000 lines get the ruler, not the gutter.** The gutter needs the
   editor laid out at full height, which costs about 16 ms per frame at 1,000 lines and
   45 ms at 2,000. In a repository, a code file up to that size scrolls as a whole page:
@@ -368,8 +485,8 @@ as the popup) and close. An expanded diagram's bar has zoom out, zoom in, fit an
   checkout, cherry-pick or blame: the history is read-only.
 - Git marks compare with `HEAD` only; there is no inline diff, blame or staging. A
   repository with more than 20,000 changed or untracked files shows the first 20,000.
-- Embedded Markdown images, PDF, CSV-as-table and HTML rendering are out of scope.
-  The mod is read-only.
+- PDF and CSV-as-table are out of scope. The mod never changes your files: comments
+  live in its own data file.
 
 ## Troubleshooting
 
@@ -377,8 +494,13 @@ as the popup) and close. An expanded diagram's bar has zoom out, zoom in, fit an
   Google Chrome or Chromium") means the mod couldn't find `mmdc` or a browser. Install
   the missing piece and press **Retry** on the notice. If `mmdc` still isn't found, set
   `MMDC` in `mermaid.js` (see Requirements) and rerun `scripts/sync.sh`.
-- **A red notice on a diagram** shows mermaid-cli's error, which usually means a syntax
-  error in the diagram. Fix the source; **Retry** renders it again.
+- **A red notice on a diagram** shows mermaid's error, which usually means a syntax
+  error in the diagram. Fix the source; **Retry** renders it again. The browser renderer
+  logs each step to `~/.config/herdr-app/mods/file-preview/.cache/mermaid.log`.
+- **"Local folders on Windows need Git for Windows"**: install it (see Requirements) and
+  press **Retry**.
+- **Send to agent does nothing visible**: the agent's terminal must be on the file's
+  machine; with no agent there, the bar says so. The text is also on the clipboard.
 - **"Cannot reach <machine>"** in the tree: the remote machine is offline. The last
   loaded tree stays visible. Press **Retry** when the machine is back.
 - **Nothing happens, or the mod looks broken:** run `herdr-app status` and look at
@@ -393,12 +515,14 @@ as the popup) and close. An expanded diagram's bar has zoom out, zoom in, fit an
 
 ```
 mods/file-preview/         the viewer (main.js, tree.js, source.js, markdown.js, lang.js, git.js, commits.js, graph.js, find.js, memory.js, mermaid.js, zoom.js, dock.js, icons/)
+                           plus annotate.js (comments, feedback), images.js (pictures, View over SSH),
+                           html.js (Reading view), shell.js (sh, Git for Windows), vendor/ (mermaid.min.js, MIT)
 mods/file-preview-panel/   launcher for the side panel (main.js, dock.js copy)
 mods/tabs-fp/              Herdr's tab bar (tabs 0.1.12) plus the Preview button and the per-tab panel width
 layouts/main-fp.json       Herdr's main layout (0.1.12) with file-preview in the right panel
 scripts/sync.sh            install / update into ~/.config/herdr-app/mods/ and layouts/
 scripts/make-big-md.sh     generates docs/fixtures/big.md (> 1 MB, not versioned)
-docs/fixtures/             test documents: every language, Mermaid, tables, binary
+docs/fixtures/             test documents: every language, Mermaid, tables, HTML, binary
 keys.json                  shortcut snippet to merge
 RECIPE.md                  brief for rebuilding the mods and the layout from scratch
 CHANGELOG.md               changes in each tagged version

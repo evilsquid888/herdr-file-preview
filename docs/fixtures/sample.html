@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Release notes</title>
+  <style>body { font-family: sans-serif; } .hidden { display: none; }</style>
+  <script>document.title += " (loaded)";</script>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Release notes</h1>
+  </header>
+  <main>
+    <p>This page is a fixture for the <strong>Reading</strong> view: its elements become blocks
+    you can comment on, and the feedback names the source lines.</p>
+    <!-- comments, scripts and styles are left out of the Reading view -->
+    <h2>What changed</h2>
+    <ul>
+      <li>Paragraph comments, drafted into the agent's prompt</li>
+      <li>Images, HTML and Windows support</li>
+      <li>Mermaid without mermaid-cli</li>
+    </ul>
+    <table>
+      <tr><th>Area</th><th>Status</th></tr>
+      <tr><td>Annotations</td><td>done</td></tr>
+      <tr><td>Images</td><td>done</td></tr>
+    </table>
+    <section>
+      <h2>Known limits</h2>
+      <p>No CSS and no scripts: the Reading view shows a page's text and structure, not its
+      design. The <a href="https://example.com">links</a> still work.</p>
+    </section>
+  </main>
+</div>
+<script>console.log("not shown");</script>
+</body>
+</html>
