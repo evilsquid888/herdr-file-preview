@@ -2442,7 +2442,12 @@ export default class FilePreview extends View {
       const src = p.src.trim();
       if (/^(https?:|data:|mailto:)/i.test(src)) return { p, key: src, state: { error: "Web image (not fetched)" } };
       const rel = normalize(src.startsWith("/") ? src.slice(1) : (dirOf ? `${dirOf}/` : "") + decodeURIComponent(src.split(/[?#]/)[0]));
-      const abs = src.startsWith("/") ? src : this.tree.abs(rel.slice(1));
+      const abs = src.startsWith("/") ? normalize(src) : this.tree.abs(rel.slice(1));
+      // A document only gets pictures from its own folder tree, and only image files: a page
+      // can't make the preview copy ~/.ssh/id_ed25519 (or anything else) into the local cache.
+      const root = this.tree.root ?? "";
+      if (!isImage(abs) || !(abs === root || abs.startsWith(root.endsWith("/") ? root : root + "/")))
+        return { p, key: `blocked|${abs}`, state: { error: isImage(abs) ? "Outside this folder (not loaded)" : "Not an image file (not loaded)" } };
       return { p, key: `${this.ctx?.on ?? ""}|${abs}`, abs };
     });
     for (const it of items) {
