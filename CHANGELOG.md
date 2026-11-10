@@ -7,6 +7,23 @@ Versions follow [Semantic Versioning](https://semver.org/): a major version chan
 something you set up yourself (a mod or layout name, a shortcut, a `keys.json` entry),
 so read its notes before updating.
 
+## Unreleased
+
+### Editing
+
+- **✎ Edit** / `e` edits the shown file (in the tree, `e` edits the selected one). **Save**
+  (`ctrl-s` / `cmd-s`) writes it and keeps editing; **Cancel** (`Esc`) asks before
+  discarding unsaved changes, as do opening another file, changing the root, opening a
+  commit and **✕**.
+- Markdown and HTML: a live preview of the buffer, **Split** / **Source** / **Preview**.
+- A save never overwrites an agent's change silently: it goes through only while the file
+  is what editing started from, else a banner offers **Use theirs** / **Keep mine**. An
+  untouched editor follows the file.
+- Remote files save through herdr-core (base64 in 24 KB pieces, a `cksum` check, an atomic
+  rename that keeps the mode). CRLF files stay CRLF.
+- Unsaved edits of a view that closed without asking come back on the next edit of the
+  file, while the file is unchanged.
+
 ## 1.1.0 — 2026-11-07 (evilsquid888 fork)
 
 ### Comments

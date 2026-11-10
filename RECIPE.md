@@ -13,7 +13,7 @@ what the docs leave out, all verified on a real build.
 
 ## What to build
 
-`file-preview` is a read-only file browser and previewer.
+`file-preview` is a file browser and previewer that can also edit a text file in place.
 
 - A **lazy file tree** of the focused terminal's `cwd`, which follows the focused
   terminal.
@@ -139,12 +139,29 @@ action down the focus path, as the bound key would), and the history hooks: `tab
 `tab:commits`, `commits-scope`, `commits-more`, `commit:<row | hash prefix>`,
 `commit-file:<n>`, `commit-back`, `commit-close`, `copy-hash`, `commits-remotes`,
 `tab:changes`, `change:<n | path>` (n counts files only), and the side panel's `popout`,
-`back` and `focus-side`. Key names (`down`, `enter`, …) go to the commit list while the
+`back` and `focus-side`, and the edit hooks: `edit` (the shown file), `edit-text:<text>`
+(replace the buffer, as typing would), `edit-append:<text>` (add to its end: a big file's
+buffer is too long for one command line), `save`, `save-force` (Keep mine), `cancel` and
+`discard` (Discard on the unsaved-changes question). Key names (`down`, `enter`, …) go to the commit list while the
 Commits tab shows. Commands reach every open copy (popup and side panel), so guard them
 by mode. These hooks make the mod testable with `herdr-app do` and `herdr-app shot`,
 with no keyboard or pointer automation.
 
 ## Platform gotchas (all learned the hard way)
+
+### Editing
+
+- `readonly` is fixed when an `EditorState` is made: edit mode makes its own editable one
+  and releases it after. `EditorState` has no focus or cursor API, so the person clicks in.
+- The dialog's `Esc` closes the popup before `on_key_down` sees it: bind `escape` (and
+  `ctrl-s` / `cmd-s`) with `cx.bind_keys` to actions in an edit key context on the preview
+  pane, and keep `onKey` out of the way while editing (it would take `r`, `b`, `/`, …).
+- `writeTextFile(path, text, expected)` is local only and is the conflict check. Remote
+  saves go through `exec`, which has no stdin: base64 in arguments, at most ~24 KB each,
+  because Windows caps a whole command line at 32 KiB (a 60 KB piece silently fails
+  there).
+- With `core.autocrlf=true` the working copy is CRLF while the repo is LF; scripts that
+  patch the sources should keep each file's endings.
 
 ### Markdown and code
 

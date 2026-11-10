@@ -3,9 +3,9 @@
 // It follows the focused terminal (local or remote space) and reloads what it shows when it changes.
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, h_resizable, resizable_panel, Editor, EditorState, TextView, Scrollbar, v_virtual_list, VirtualListScrollHandle, InputState, Input, Textarea, TextareaState } from "gpui-base";
-import { spaces, panes, focused, exec, watchFolder, theme, settings, props, closeOverlay, openOverlay, nextCommand, home, window, run, shared, setShared, agents } from "herdr";
+import { spaces, panes, focused, exec, watchFolder, readTextFile, theme, settings, props, closeOverlay, openOverlay, nextCommand, home, window, run, shared, setShared, agents } from "herdr";
 import { Tree, parent, PER_FOLDER, TOTAL } from "./tree.js";
-import { readSource, stamp, LIMIT } from "./source.js";
+import { readSource, stamp, LIMIT, saveText, editToken } from "./source.js";
 import { segment } from "./markdown.js";
 import * as lang from "./lang.js";
 import { Mermaid, fnv1a, cacheKey, themeOf } from "./mermaid.js";
@@ -32,6 +32,13 @@ const charWidth = (font) => font * 0.6;
 const WRAP_PAD = 24;
 const CODE_PAD = 6;          // space above and below a fence's text
 const COPIED_MS = 1500;
+// Edit mode: its own key context (Esc and Save must beat the dialog's own Esc), and the
+// live preview of Markdown and HTML redrawn this long after the last keystroke.
+const EDIT_CONTEXT = "FilePreviewEdit", EDIT_SAVE = "file_preview_edit_save", EDIT_CANCEL = "file_preview_edit_cancel";
+const EDIT_DEBOUNCE = 300, SAVED_MS = 2000;
+// Unsaved edits of a view that closed without asking, restored on the next edit of the file.
+const DRAFT_KEY = "file-preview.draft", DRAFT_MAX = 512 * 1024;
+const draftKey = (on, abs) => `${on ?? "local"}:${abs}`;
 const MAX_EDITORS = 300;     // fences past this stay in the prose, uncolored
 const MAX_DIAGRAM_W = 600;   // diagram display width cap (logical px), besides the column and half the PNG
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -215,6 +222,12 @@ export default class FilePreview extends View {
       cx.bind_keys([{ keystroke: "escape", action: FIND_ESCAPE, context: FIND_CONTEXT },
         { keystroke: "cmd-f", action: FIND_OPEN, context: TREE_CONTEXT }, { keystroke: "cmd-f", action: FIND_OPEN, context: DOC_CONTEXT }]);
     } catch {}
+    try {
+      cx.bind_keys([{ keystroke: "escape", action: EDIT_CANCEL, context: EDIT_CONTEXT },
+        { keystroke: "ctrl-s", action: EDIT_SAVE, context: EDIT_CONTEXT }, { keystroke: "cmd-s", action: EDIT_SAVE, context: EDIT_CONTEXT }]);
+    } catch {}
+    this.edit = null;       // edit mode (startEdit): { rel, abs, on, base, state, dirty, saving, disk, confirm, ... }
+    this.editWanted = null; // `e` on another file in the tree: edit it once it has loaded
     // A panel's expanded diagram: this copy is only that dialog (no tree, context or watchers).
     if (this.mode === "diagram") return this.initDiagram(p, cx);
     this.treeFocus = cx.focus_handle();
@@ -299,6 +312,10 @@ export default class FilePreview extends View {
     // However it closes (Esc, ✕, cmd-e, the anchor), the side panel it came from shows again.
     if (this.fromSide && !this.closed) { try { showSide(); } catch {} }
     this.closed = true;
+    // Closed some way that couldn't ask (Esc in the tree, the open/close key): keep the edits.
+    if (this.edit?.dirty) this.keepDraft(this.edit);
+    this.edit?.state.release();
+    this.edit = null;
     if (this.zoom) this.zoom.closed = true;
     this.zoomFocus?.release();
     this.mermaid?.close();
@@ -324,6 +341,7 @@ export default class FilePreview extends View {
 
   /** Drops the tree and every watcher of the old context. `key` is the raw location key. */
   start(ctx, key, cx, restore = true) {
+    if (this.edit) this.dropEdit(null);   // callers ask leaveEdit first
     if (this.ctx) this.stop(this.ctx);
     this.ctxKey = key;
     const cwd = ctx.cwd || (ctx.on ? "" : home());
@@ -366,7 +384,7 @@ export default class FilePreview extends View {
   follow(cx) {
     const f = focused();
     if (!f?.terminal) return;        // a mod pane (this one too) or no window: keep the last root
-    if (this.pinned) return;
+    if (this.pinned || this.edit) return;   // editing holds the root; it follows again after
     const l = location();
     if (!l.cwd && !l.on) return;
     const key = ctxKey(l);
@@ -682,6 +700,15 @@ export default class FilePreview extends View {
    * same). keep: after a context change, clear the preview if the file isn't there.
    */
   show(rel, cx, { quiet = false, keep = false, read = null } = {}) {
+    const e = this.edit;
+    // Editing: the file's own reloads only check the disk (the buffer is never replaced);
+    // another file waits until the edit is saved or dropped.
+    if (e && rel === e.rel && !read) { if (cx) this.editDisk(cx); return; }
+    if (e) {
+      if (!cx) this.dropEdit(null);
+      else if (!this.leaveEdit(() => this.show(rel, cx, { quiet, keep, read }), cx)) return;
+    }
+    if (this.editWanted && this.editWanted !== rel) this.editWanted = null;
     // A file picked by the user leaves the commit view; read() loads a file as of a commit.
     if (!quiet && !read) { this.closeCommitView(); this.atCommit = null; }
     const seq = ++this.seq;
@@ -717,6 +744,7 @@ export default class FilePreview extends View {
       this.decorate();
       this.runDoc();
       this.refreshMarks(cx);
+      if (this.editWanted === rel) { this.editWanted = null; this.startEdit(cx); }
       cx.notify();
     });
   }
@@ -1177,8 +1205,16 @@ export default class FilePreview extends View {
 
   command(c, cx) {
     if (c === "focus") return this.focusTree();
-    if (c === "anchor") return this.anchor();
-    if (c === "popout") { if (this.mode === "side") this.popOut(); return; }
+    if (c === "anchor") return this.anchor(cx);
+    if (c === "popout") { if (this.mode === "side") this.popOut(cx); return; }
+    // Edit mode: edit (the shown file), save, cancel; edit-text:<text> replaces the buffer (tests).
+    if (c === "edit") { if (!this.startEdit(cx)) this.note = this.editBlocker() ?? this.note; return; }
+    if (c === "save") return this.saveEdit(cx);
+    if (c === "save-force") return this.saveEdit(cx, true);
+    if (c === "cancel") return this.cancelEdit(cx);
+    if (c === "discard") { if (this.edit?.confirm) this.confirmLeave(cx); return; }
+    if (c.startsWith("edit-text:")) { if (this.edit) { this.edit.state.set_value(c.slice(10)); this.editChanged(cx); } return; }
+    if (c.startsWith("edit-append:")) { if (this.edit) { this.edit.state.set_value(String(this.edit.state.value() ?? "") + c.slice(12)); this.editChanged(cx); } return; }
     // Sent when the side panel opens: it takes the keyboard from the terminal.
     if (c === "focus-side") { if (this.mode === "side") (this.viewShown() ? this.previewFocus : this.sideFocus()).focus(); return; }
     if (c === "back") { if (this.viewShown()) this.toList(); return; }
@@ -1282,6 +1318,11 @@ export default class FilePreview extends View {
   onKey(e, cx, where) {
     if (this.inInput) { this.inInput = false; return; }   // typed into a search field
     const m = e.modifiers;
+    // Editing: every key is the editor's (no r, b, /, zoom); only Ctrl/Cmd+S saves.
+    if (this.edit && where === "preview") {
+      if ((m.control || m.platform) && !m.alt && e.key === "s") { cx.stop_propagation(); this.saveEdit(cx); }
+      return;
+    }
     if (m.platform && !m.control && !m.alt && e.key === "f") { cx.stop_propagation(); this.openFind(where, cx); return; }
     if (m.platform || m.control || m.alt) return;
     if (e.key === "escape") {
@@ -1290,6 +1331,8 @@ export default class FilePreview extends View {
       return;
     }
     if (e.key === "/" || e.key_char === "/") { cx.stop_propagation(); this.openFind(where, cx); return; }
+    // e: edit the shown file (in the tree: the selected file, opened first).
+    if (e.key === "e" && !m.shift && (where === "preview" || where === "tree")) { cx.stop_propagation(); this.editKey(where, cx); cx.notify(); return; }
     // n / shift-n: next and previous match (line, in a code file) while the document has the keyboard.
     if (where === "preview" && this.ds && (e.key === "n" || e.key === "N")) {
       cx.stop_propagation(); this.docStep(m.shift || e.key === "N" ? -1 : 1); cx.notify(); return;
@@ -1364,8 +1407,9 @@ export default class FilePreview extends View {
   }
 
   /** Popup ⇥: the side panel (as the launcher opens it), showing this file; then the popup goes. */
-  anchor() {
+  anchor(cx) {
     if (!this.overlay || !sideAvailable()) return;
+    if (!this.leaveEdit(() => this.anchor(cx), cx)) return;
     const file = this.memFile();
     closeOverlay(this.overlay);
     showSide();
@@ -1373,7 +1417,8 @@ export default class FilePreview extends View {
   }
 
   /** Side panel ⤢: the popup in its place, on this file; closing it brings the side panel back. */
-  popOut() {
+  popOut(cx) {
+    if (!this.leaveEdit(() => this.popOut(cx), cx)) return;
     const file = this.memFile();
     hideSide();
     openOverlay({ kind: "dialog", width: 0.95, height: 0.95, mod: "file-preview",
@@ -1381,7 +1426,8 @@ export default class FilePreview extends View {
   }
 
   /** ✕: the popup closes its overlay; the side panel hides; an old docked pane closes. */
-  closeView() {
+  closeView(cx) {
+    if (!this.leaveEdit(() => this.closeView(cx), cx)) return;
     if (this.overlay) return closeOverlay(this.overlay);
     if (this.mode === "side") return hideSide();
     const mine = panelOf(focusedTab());
@@ -1573,6 +1619,7 @@ export default class FilePreview extends View {
   openCommit(hash, cx) {
     const ctx = this.ctx;
     if (!ctx) return;
+    if (!this.leaveEdit(() => this.openCommit(hash, cx), cx)) return;
     if (this.atCommit) this.commitBack(cx);
     this.toView();
     if (this.commit?.hash === hash && !this.commit.error) { cx.notify(); return; }
@@ -1731,6 +1778,7 @@ export default class FilePreview extends View {
   openChange(row, cx) {
     const ctx = this.ctx;
     if (!ctx) return;
+    if (!this.leaveEdit(() => this.openChange(row, cx), cx)) return;
     if (this.atCommit) this.commitBack(cx);
     this.toView();
     if (this.commit?.change?.key === row.key && !this.commit.error) { cx.notify(); return; }
@@ -1909,17 +1957,24 @@ export default class FilePreview extends View {
         .tooltip("Follow the focused terminal's folder again")))
       .when(Boolean(on), (el) => el.child(div().flex_none().px(6).rounded(4).bg(t.raised).text_size(11)
         .text_color(this.tree.offline ? t.ansi3 : t.muted).child(this.tree.offline ? `${on} · offline` : on)))
-      .when(Boolean(this.doc && (this.doc.kind === "markdown" || this.doc.kind === "text") && !this.commitShown()), (el) =>
+      .when(Boolean(!this.edit && this.doc && (this.doc.kind === "markdown" || this.doc.kind === "text") && !this.commitShown()), (el) =>
         el.child(this.button("fp-find-doc", "search-doc.svg", t, (_e, cx) => this.openDocFind(cx))))
       .child(this.textButton("fp-text-out", "A−", t, (_e, cx) => this.textAct("out", cx)))
       .child(div().id("fp-text-pct").w(40).flex_none().rounded(4).text_center().text_size(11.5).cursor_pointer().hover((s) => s.bg(t.hover))
         .text_color(this.textZoom === 1 ? t.dim : t.foreground).on_click((_e, cx) => this.textAct("reset", cx))
         .child(`${Math.round(this.textZoom * 100)}%`))
       .child(this.textButton("fp-text-in", "A+", t, (_e, cx) => this.textAct("in", cx)))
+      .when(!this.edit && Boolean(this.file) && !this.commitShown() && Boolean(this.doc) && (this.doc.kind === "markdown" || this.doc.kind === "text"), (el) => {
+        const why = this.editBlocker();
+        return el.child(h_flex().id("fp-edit").h(22).px(7).gap(4).flex_none().rounded(5).items_center().text_size(12)
+          .when(!why, (e) => e.cursor_pointer().text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click((_e, cx) => this.startEdit(cx)))
+          .when(Boolean(why), (e) => e.text_color(t.dim))
+          .tooltip(why ?? "Edit this file (e)").child("✎ Edit"));
+      })
       .child(this.button("fp-reload", "reload.svg", t, (_e, cx) => this.reload(cx)))
-      .when(Boolean(this.overlay) && sideAvailable(), (el) => el.child(this.button("fp-anchor", "anchor.svg", t, () => this.anchor())))
-      .when(this.mode === "side", (el) => el.child(this.button("fp-popout", "expand.svg", t, () => this.popOut())))
-      .child(this.button("fp-close", "close.svg", t, () => this.closeView()));
+      .when(Boolean(this.overlay) && sideAvailable(), (el) => el.child(this.button("fp-anchor", "anchor.svg", t, (_e, cx) => this.anchor(cx))))
+      .when(this.mode === "side", (el) => el.child(this.button("fp-popout", "expand.svg", t, (_e, cx) => this.popOut(cx))))
+      .child(this.button("fp-close", "close.svg", t, (_e, cx) => this.closeView(cx)));
   }
 
   row(r, t, focus) {
@@ -1967,6 +2022,7 @@ export default class FilePreview extends View {
   /** Makes `abs` (on the same machine) the root, and stops following the terminal until ↺. */
   setRoot(abs, cx) {
     if (!abs || abs === this.tree.root) return;
+    if (!this.leaveEdit(() => this.setRoot(abs, cx), cx)) return;
     const l = { cwd: abs, on: this.ctx?.on ?? null }, key = ctxKey(l);
     this.manualRoot = true;
     this.pinned = true;
@@ -1984,6 +2040,7 @@ export default class FilePreview extends View {
 
   /** Back to the focused terminal's folder (the one this view would follow). */
   followTerminal(cx) {
+    if (!this.leaveEdit(() => this.followTerminal(cx), cx)) return;
     this.manualRoot = false;
     this.pinned = this.pinnedByProps;
     const l = initial({});
@@ -2430,29 +2487,320 @@ export default class FilePreview extends View {
     if (this.commitShown()) body = this.commitView(this.commit, t, narrow);
     else if (!this.file) body = this.message(t, "Select a file", "↑ ↓ move · → ← open/close folder · Enter open · Tab tree/preview · b show/hide tree · / find · + − 0 zoom · r reload" + (this.overlay ? " · Esc close" : ""));
     else if (!doc) body = this.message(t, "Loading…");
-    else if (doc.kind === "markdown")
-      body = v_flex().flex_1().min_h(0).child(this.notesBar(t)).child(v_flex().id(`doc:${this.file}`).flex_1().min_h(0).overflow_y_scrollbar()
-        .child(h_flex().w_full().justify_center().px(narrow ? 12 : 24).py(narrow ? 12 : 20)
-          .child(v_flex().id("fp-col").w_full().max_w(Math.round(COL_W * this.textZoom)).gap(Math.round(12 * this.textZoom)).text_size(this.proseSize())
-            .on_size_change((size, cx) => { if (Math.round(size.width) !== this.colW) { this.colW = Math.round(size.width); cx.notify(); } })
-            .children((() => {
-              const placed = this.notes.place(this.noteKey(), this.blocks).at;
-              return this.blocks.map((b, i) => b.kind === "md"
-                ? this.annotated(b, i, t, placed[i] ?? [], this.marked(b, t, this.aimable(i, b.pics ? this.picsBlock(b, i, t)
-                  : b.html ? TextView.html(`html-${i}`, b.text).selectable(true).on_link_click((url, cx) => this.link(url, cx))
-                  : TextView.markdown(`md-${i}`, this.markedText(b, t)).selectable(true).on_link_click((url, cx) => this.link(url, cx)))))
-                : this.marked(b, t, b.kind === "mmd" ? this.diagramBlock(b, i, t) : this.codeBlock(b, i, t)));
-            })()))));
+    else if (this.edit) body = this.editView(t, narrow);
+    else if (doc.kind === "markdown") body = v_flex().flex_1().min_h(0).child(this.notesBar(t)).child(this.docScroll(t, narrow, true));
     else if (doc.kind === "text" && this.code) body = this.codeView(t);
     else if (doc.kind === "image") body = this.imageView(doc, t, narrow);
     else body = this.message(t, doc.message ?? "Cannot preview this file");
-    if (doc && this.file && isHtml(this.file) && (doc.kind === "markdown" || doc.kind === "text")) body = v_flex().flex_1().min_h(0).child(this.htmlBar(t)).child(body);
+    if (!this.edit && doc && this.file && isHtml(this.file) && (doc.kind === "markdown" || doc.kind === "text")) body = v_flex().flex_1().min_h(0).child(this.htmlBar(t)).child(body);
     return v_flex().id("fp-preview-pane").flex_1().min_w(0).h_full().min_h(0).bg(t.surface)
       .track_focus(this.previewFocus).on_key_down((e, cx) => this.onKey(e, cx, "preview"))
-      .key_context(DOC_CONTEXT).on_action(FIND_OPEN, (_e, cx) => this.openDocFind(cx))
+      .when(!this.edit, (el) => el.key_context(DOC_CONTEXT).on_action(FIND_OPEN, (_e, cx) => this.openDocFind(cx)))
+      .when(Boolean(this.edit), (el) => el.key_context(EDIT_CONTEXT)
+        .on_action(EDIT_SAVE, (_e, cx) => this.saveEdit(cx))
+        .on_action(EDIT_CANCEL, (_e, cx) => { if (this.edit?.confirm) { this.edit.confirm = null; cx.notify(); } else this.cancelEdit(cx); }))
       .when(Boolean(this.atCommit), (el) => el.child(this.atBanner(t)))
       .when(Boolean(this.ds), (el) => el.child(this.findBar("doc", t)))
       .child(body);
+  }
+
+  // ---- edit mode ----
+  //
+  // ✎ Edit or `e` swaps the preview for an editable Editor on the file's text. Save (Ctrl/Cmd+S)
+  // writes it back and keeps editing; Cancel (Esc) goes back to the preview, asking first when
+  // there are unsaved changes. Markdown and HTML get a live preview of the buffer beside it
+  // (Split) or in its place (Source | Preview). While editing, the file's live reloads only
+  // compare the disk with the text editing started from: an untouched buffer follows the disk,
+  // an edited one gets a "changed on disk" banner. The save itself refuses a file that moved on
+  // (source.js: saveText), so an agent's write is never overwritten without asking.
+
+  /** Why the shown file can't be edited, or null when it can. */
+  editBlocker() {
+    const d = this.doc;
+    if (!this.file || !d) return "No file";
+    if (this.atCommit) return "Read-only: a file as of a commit";
+    if (d.kind !== "markdown" && d.kind !== "text") return "Only text files can be edited";
+    if (d.truncated) return "Too big to edit here (over 1 MB)";
+    if (this.ctx?.on && this.tree.offline) return "The machine is offline";
+    return null;
+  }
+
+  /** `e`: the shown file; in the tree, the selected file (opened first, edited once loaded). */
+  editKey(where, cx) {
+    const row = where === "tree" ? this.rowsNow().find((r) => r.path === this.cursor) : null;
+    if (row && !row.dir && !row.denied && row.path !== this.file) {
+      this.editWanted = row.path;
+      this.show(row.path, cx);
+      this.toView();
+      return;
+    }
+    if (!this.startEdit(cx)) this.note = this.editBlocker() ?? this.note;
+  }
+
+  startEdit(cx) {
+    if (this.edit || this.editBlocker() || !this.ctx) return Boolean(this.edit);
+    const doc = this.doc, rel = this.file, on = this.ctx.on ?? null;
+    if (this.ds) this.closeDocFind(false);
+    this.aiming = null;
+    const md = lang.isMarkdown(rel), html = isHtml(rel), language = lang.forPath(rel);
+    const state = EditorState.new({ font_family: settings().font_family, font_size: this.codeFont, syntax: syntax(),
+      ...(language ? { language } : {}), soft_wrap: md || lang.wraps(language), value: doc.text });
+    const e = this.edit = {
+      rel, abs: this.tree.abs(rel), on, state,
+      base: doc.text,                         // the file's text as last read or saved
+      crlf: doc.text.includes("\r\n"),        // written back with CRLF when the Editor gives LF
+      token: null,                            // remote: cksum of the file at `base` (source.js)
+      dirty: false, saving: false, saved: 0, error: null,
+      disk: null,                             // changed on disk meanwhile: { text } | { gone: true }
+      confirm: null,                          // "discard changes?": { go } runs after Discard
+      rich: md || html, html, tick: 0,
+      pane: this.stacked() || this.narrow() ? "source" : "split",
+    };
+    // A draft this file was closed with: back in the buffer while the file is as it was then.
+    const draft = shared(DRAFT_KEY);
+    if (draft?.key === draftKey(on, e.abs)) {
+      setShared(DRAFT_KEY, null);
+      if (draft.base === doc.text && typeof draft.text === "string") {
+        state.set_value(draft.text);
+        e.dirty = this.editText(e) !== e.base;
+        this.note = "Restored your unsaved edits";
+      } else this.note = "Dropped an unsaved draft: the file changed since";
+    }
+    state.on("change", (_ev, cx) => this.editChanged(cx));
+    if (on) cx.spawn(async () => { const tk = await editToken(e.abs, on).catch(() => null); if (this.edit === e && e.token === null) e.token = tk; });
+    if (e.rich) this.editPreview(cx);
+    this.toView();
+    this.previewFocus.focus();
+    cx.notify();
+    return true;
+  }
+
+  /** The buffer as it would be written: CRLF files stay CRLF. */
+  editText(e) {
+    const v = String(e.state.value() ?? "");
+    return e.crlf && !v.includes("\r") ? v.replace(/\n/g, "\r\n") : v;
+  }
+
+  editChanged(cx) {
+    const e = this.edit;
+    if (!e) return;
+    e.dirty = this.editText(e) !== e.base;
+    e.error = null;
+    if (e.rich) {
+      const tick = ++e.tick;
+      cx.timer.after(EDIT_DEBOUNCE, (cx) => { if (this.edit === e && e.tick === tick) this.editPreview(cx); });
+    }
+    cx.notify();
+  }
+
+  /** Markdown / HTML: the preview shows the buffer (this.doc becomes it until the edit ends). */
+  editPreview(cx) {
+    const e = this.edit;
+    if (!e?.rich) return;
+    const text = String(e.state.value() ?? ""), d = this.doc;
+    if (d?.kind === "markdown" && d.text === text && Boolean(d.html) === e.html) return;
+    const doc = { kind: "markdown", text, truncated: false, editing: true };
+    if (e.html) { doc.html = true; doc.segments = htmlSegments(text); } else doc.segments = segment(text);
+    cx.spawn(async (cx) => {
+      const theme = themeOf(this.dark);
+      await this.mermaid.prepare(doc.segments.filter((s) => s.kind === "code" && s.info.toLowerCase() === "mermaid").map((s) => cacheKey(s.text, theme)));
+      if (this.edit !== e || String(e.state.value() ?? "") !== text) return;
+      const prev = this.doc;
+      this.doc = doc;
+      if (!this.patch(prev, cx)) this.build(cx);
+      cx.notify();
+    });
+  }
+
+  /** The file's own reload while editing: an untouched buffer follows the disk; an edited one is told. */
+  editDisk(cx) {
+    const e = this.edit;
+    if (!e || e.checking || e.saving) return;
+    e.checking = true;
+    cx.spawn(async (cx) => {
+      let text;
+      try { text = await readTextFile(e.abs, { on: e.on }); } catch { text = undefined; }   // too big or unreachable: keep going
+      finally { e.checking = false; }
+      if (this.edit !== e || text === undefined || e.saving) return;
+      if (text === null) { e.disk = { gone: true }; cx.notify(); return; }
+      if (text === e.base) { if (e.disk) { e.disk = null; cx.notify(); } return; }
+      if (!e.dirty) { this.adoptDisk(text, cx); return; }
+      e.disk = { text };
+      cx.notify();
+    });
+  }
+
+  /** Takes the disk's text into the buffer (Use theirs, or a clean buffer following an agent). */
+  adoptDisk(text, cx) {
+    const e = this.edit;
+    if (!e) return;
+    e.base = text;
+    e.crlf = text.includes("\r\n");
+    e.disk = null; e.error = null; e.token = null;
+    e.state.set_value(text);
+    e.dirty = false;
+    if (e.on) cx.spawn(async () => { const tk = await editToken(e.abs, e.on).catch(() => null); if (this.edit === e && e.base === text) e.token = tk; });
+    if (e.rich) this.editPreview(cx);
+    cx.notify();
+  }
+
+  /** Save (Ctrl/Cmd+S): writes the buffer and keeps editing. force: over whatever the disk holds now. */
+  saveEdit(cx, force = false) {
+    const e = this.edit;
+    if (!e || e.saving || (!e.dirty && !force && !e.disk)) return;
+    const text = this.editText(e);
+    e.saving = true; e.error = null;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        const tk = await saveText(e.abs, text, { on: e.on, base: force ? null : e.base, token: force ? null : e.token });
+        e.base = text;
+        e.token = e.on ? tk : null;
+        e.disk = null;
+        e.saved = Date.now();
+        cx.timer.after(SAVED_MS + 50, (cx) => cx.notify());
+      } catch (err) {
+        if (err?.conflict) {
+          const now = await readTextFile(e.abs, { on: e.on }).catch(() => undefined);
+          e.disk = now === null ? { gone: true } : { text: now ?? null };
+        } else e.error = `Not saved: ${String(err?.message ?? err)}`;
+      } finally {
+        e.saving = false;
+      }
+      if (this.edit === e) e.dirty = this.editText(e) !== e.base;   // typed on during the save
+      cx.notify();
+    });
+  }
+
+  /** Cancel (Esc): back to the preview; with unsaved changes, ask first. */
+  cancelEdit(cx) {
+    const e = this.edit;
+    if (!e) return;
+    if (e.dirty) { e.confirm = { go: null }; cx.notify(); return; }
+    this.dropEdit(cx);
+    cx.notify();
+  }
+
+  /**
+   * Before leaving the edited file (another file, root, commit, closing): true to go on now.
+   * With unsaved changes it asks instead, and `go` runs after Discard.
+   */
+  leaveEdit(go, cx) {
+    const e = this.edit;
+    if (!e) return true;
+    if (!e.dirty) { this.dropEdit(cx); return true; }
+    e.confirm = { go };
+    this.toView();
+    cx?.notify();
+    return false;
+  }
+
+  /** Discard on the "unsaved changes" question. */
+  confirmLeave(cx) {
+    const go = this.edit?.confirm?.go;
+    this.dropEdit(cx);
+    go?.();
+    cx.notify();
+  }
+
+  /** Unsaved edits of a closing view, for the next edit of that file (one draft at a time). */
+  keepDraft(e) {
+    const text = String(e.state.value() ?? "");
+    if (text.length > DRAFT_MAX) return;
+    try { setShared(DRAFT_KEY, { key: draftKey(e.on, e.abs), base: e.base, text, at: Date.now() }); } catch {}
+  }
+
+  /** Ends edit mode; the preview reads the file again (it showed the buffer). */
+  dropEdit(cx) {
+    const e = this.edit;
+    if (!e) return;
+    this.edit = null;
+    e.state.release();
+    if (cx && this.file === e.rel) this.show(e.rel, cx, { quiet: true });
+  }
+
+  editView(t, narrow) {
+    const e = this.edit;
+    const editor = div().size_full().min_h(0).child(Editor.new(e.state).size_full());
+    let body;
+    if (!e.rich || e.pane === "source") body = div().flex_1().min_h(0).w_full().child(editor);
+    else if (this.doc?.kind !== "markdown") body = this.message(t, "Rendering…");
+    else if (e.pane === "preview") body = this.docScroll(t, narrow, false);
+    else body = h_resizable("fp-edit-split").flex_1().min_h(0).w_full()
+      .child(resizable_panel().child(editor))
+      .child(resizable_panel().child(v_flex().size_full().min_h(0).border_l(1).border_color(t.border).child(this.docScroll(t, true, false))));
+    return v_flex().flex_1().min_h(0).child(this.editBar(t)).child(this.editBanner(t)).child(body);
+  }
+
+  editBar(t) {
+    const e = this.edit, name = e.rel.split("/").pop();
+    const status = e.saving ? "Saving…" : e.error ? e.error : e.saved && Date.now() - e.saved < SAVED_MS && !e.dirty ? "Saved"
+      : e.dirty ? "Unsaved changes" : "No changes";
+    const btn = (id, label, primary, enabled, go, tip) => h_flex().id(id).h(24).flex_none().px(12).items_center().rounded(5).text_size(12)
+      .when(primary && enabled, (el) => el.bg(t.solid).text_color(t.solid_foreground).hover((s) => s.bg(t.accent).text_color(t.accent_foreground)))
+      .when(primary && !enabled, (el) => el.bg(t.raised).text_color(t.dim))
+      .when(!primary, (el) => el.border_1().border_color(t.border).text_color(t.muted).hover((s) => s.bg(t.hover)))
+      .when(enabled, (el) => el.cursor_pointer().on_click(go))
+      .tooltip(tip).child(label);
+    const tab = (id, label, pane) => h_flex().id(id).h(22).px(10).items_center().rounded(5).cursor_pointer().text_size(12)
+      .when(e.pane === pane, (el) => el.bg(t.selected).text_color(t.foreground))
+      .when(e.pane !== pane, (el) => el.text_color(t.muted).hover((s) => s.bg(t.hover)))
+      .on_click((_ev, cx) => { e.pane = pane; if (pane !== "source") this.editPreview(cx); cx.notify(); }).child(label);
+    const wide = !this.stacked() && !this.narrow();
+    return h_flex().flex_none().w_full().h(36).px(12).gap(6).items_center().border_b(1).border_color(t.border).bg(t.chrome)
+      .child(div().flex_none().text_size(12).text_color(e.dirty ? t.ansi3 : t.dim).child(e.dirty ? "●" : "✎"))
+      .child(div().flex_none().max_w(240).truncate().text_size(12).font_medium().text_color(t.foreground).child(name))
+      .when(e.rich, (el) => el.child(h_flex().flex_none().gap(2).ml(6)
+        .when(wide, (r) => r.child(tab("fp-edit-split-tab", "Split", "split")))
+        .child(tab("fp-edit-source-tab", "Source", "source"))
+        .child(tab("fp-edit-preview-tab", "Preview", "preview"))))
+      .child(div().flex_1().min_w(0).truncate().text_right().text_size(11)
+        .text_color(e.error ? t.ansi1 : status === "Saved" ? t.ansi2 : t.dim).child(status))
+      .child(btn("fp-edit-cancel", "Cancel", false, true, (_ev, cx) => this.cancelEdit(cx), "Back to the preview (Esc)"))
+      .child(btn("fp-edit-save", "Save", true, (e.dirty || Boolean(e.disk)) && !e.saving, (_ev, cx) => this.saveEdit(cx), "Save the file (Ctrl+S / Cmd+S)"));
+  }
+
+  /** The question over the editor: discard unsaved changes, or the file changed on disk. */
+  editBanner(t) {
+    const e = this.edit;
+    if (!e.confirm && !e.disk) return div();
+    const btn = (id, label, primary, go) => h_flex().id(id).h(24).flex_none().px(10).items_center().rounded(5).cursor_pointer().text_size(12)
+      .when(primary, (el) => el.bg(t.solid).text_color(t.solid_foreground).hover((s) => s.bg(t.accent).text_color(t.accent_foreground)))
+      .when(!primary, (el) => el.border_1().border_color(t.border).text_color(t.muted).hover((s) => s.bg(t.hover)))
+      .on_click(go).child(label);
+    const bar = (icon, color, text, ...buttons) => h_flex().flex_none().w_full().min_h(38).px(12).py(6).gap(8).items_center()
+      .border_b(1).border_color(t.border).bg(t.raised)
+      .child(div().flex_none().text_size(12).text_color(color).child(icon))
+      .child(div().flex_1().min_w(0).text_size(12).text_color(t.foreground).child(text))
+      .children(buttons);
+    if (e.confirm) return bar("⚠", t.ansi3, "Discard your unsaved changes?",
+      btn("fp-edit-keep", "Keep editing", false, (_ev, cx) => { e.confirm = null; cx.notify(); }),
+      btn("fp-edit-discard", "Discard", true, (_ev, cx) => this.confirmLeave(cx)));
+    if (e.disk.gone) return bar("⚠", t.ansi1, "This file was deleted on disk. Save puts your text back.",
+      btn("fp-edit-recreate", "Save anyway", true, (_ev, cx) => this.saveEdit(cx, true)));
+    return bar("⚠", t.ansi3, "This file changed on disk while you were editing.",
+      btn("fp-edit-theirs", "Use theirs", false, (_ev, cx) => { if (typeof e.disk.text === "string") this.adoptDisk(e.disk.text, cx); else this.editDisk(cx); }),
+      btn("fp-edit-mine", "Keep mine", true, (_ev, cx) => this.saveEdit(cx, true)));
+  }
+
+  /**
+   * A Markdown (or HTML Reading) document's scrolling column. notes: paragraphs take comments;
+   * off in edit mode's preview, which shows the buffer, not the file.
+   */
+  docScroll(t, narrow, notes) {
+    return v_flex().id(notes ? `doc:${this.file}` : `edit-doc:${this.file}`).flex_1().min_h(0).overflow_y_scrollbar()
+      .child(h_flex().w_full().justify_center().px(narrow ? 12 : 24).py(narrow ? 12 : 20)
+        .child(v_flex().id("fp-col").w_full().max_w(Math.round(COL_W * this.textZoom)).gap(Math.round(12 * this.textZoom)).text_size(this.proseSize())
+          .on_size_change((size, cx) => { if (Math.round(size.width) !== this.colW) { this.colW = Math.round(size.width); cx.notify(); } })
+          .children((() => {
+            const placed = notes ? this.notes.place(this.noteKey(), this.blocks).at : [];
+            const prose = (b, i) => b.pics ? this.picsBlock(b, i, t)
+              : b.html ? TextView.html(`html-${i}`, b.text).selectable(true).on_link_click((url, cx) => this.link(url, cx))
+              : TextView.markdown(`md-${i}`, this.markedText(b, t)).selectable(true).on_link_click((url, cx) => this.link(url, cx));
+            return this.blocks.map((b, i) => b.kind === "md"
+              ? notes ? this.annotated(b, i, t, placed[i] ?? [], this.marked(b, t, this.aimable(i, prose(b, i)))) : this.marked(b, t, prose(b, i))
+              : this.marked(b, t, b.kind === "mmd" ? this.diagramBlock(b, i, t) : this.codeBlock(b, i, t)));
+          })())));
   }
 
   // ---- HTML ----
@@ -2863,6 +3211,7 @@ export default class FilePreview extends View {
       const m = this.blocks.filter((b) => b.kind === "mmd"), busy = m.filter((b) => b.d?.pending).length;
       if (m.length) parts.push(busy ? `Rendering ${plural(busy, "diagram")}…` : plural(m.length, "diagram"));
     }
+    if (this.edit) parts.push(this.edit.dirty ? "Editing · unsaved changes" : "Editing");
     const where = this.docWhere();
     if (where) parts.push(`Find: ${where}`);
     if (this.note) parts.push(this.note);

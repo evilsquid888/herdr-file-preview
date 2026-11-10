@@ -4,7 +4,7 @@ A [Herdr](https://herdr.dev) layout (`main-fp`) and the mods behind it: a file t
 focused terminal's folder next to a rendered preview of the selected file: Markdown with highlighted code fences,
 Mermaid diagrams and pictures, HTML, images, plus syntax-highlighted source files. You can
 **comment on paragraphs and hand the comments to the agent in that tab** as a draft to
-review. It works in local and remote spaces, on macOS, Linux and Windows, reloads live
+review, and **edit a file in place** (with a live preview beside Markdown and HTML). It works in local and remote spaces, on macOS, Linux and Windows, reloads live
 while agents edit files, and opens as a side panel on the right of the window (a Preview
 button next to Files and Changes) or as a near-full-screen popup.
 
@@ -82,6 +82,29 @@ and Mermaid without mermaid-cli; everything else is the original's.
   CSS, so you see the page's text and structure, not its design. **Source** shows the code.
 
   ![The Reading view of an HTML file: a heading, a commented paragraph, a list and a table](preview-html.png)
+- **Editing.** **✎ Edit** in the top bar, or `e` (in the tree: the selected file), turns the
+  preview into an editor on the file's text, with line numbers (and highlighting in code
+  files).
+  - **Save** (`ctrl-s` / `cmd-s`) writes the file and keeps you editing; **Cancel** (`Esc`)
+    goes back to the preview, asking first if there are unsaved changes. Opening another
+    file, changing the root, opening a commit or closing with **✕** asks the same.
+  - **Markdown and HTML** get a live preview of what you type: **Split** (side by side,
+    in the popup), **Source** or **Preview**. Diagrams render as you go. The HTML preview
+    is the Reading view (no CSS); there is no WYSIWYG editing.
+  - **Agents can't be overwritten by accident.** A save only goes through while the file
+    is still what you started from. If an agent changed it meanwhile, a banner offers
+    **Use theirs** (take the disk's text) or **Keep mine** (save over it). An untouched
+    editor simply follows the file as it changes.
+  - **Remote files** save through the same connection the preview reads with: the text
+    goes over as base64 in pieces into a temporary file next to the original, then one
+    step checks the file is unchanged (`cksum`), and renames the new text into place,
+    keeping its permissions. A symlink is written through, not replaced. The remote
+    machine needs `base64` (standard on Linux and macOS).
+  - Line endings are kept (a CRLF file stays CRLF). Files over 1 MB, binary files,
+    images and files shown as of a commit can't be edited.
+  - If the view closes without asking (`Esc` in the tree, the open/close key), your
+    unsaved text is kept and comes back the next time you edit that file, as long as the
+    file hasn't changed since.
 - **Windows**: local folders work through Git for Windows' `sh` (its `stat`, `find`,
   `head` and `git`), which the mod finds by itself; remote folders work as from macOS.
   Windows line endings (CRLF) are read correctly.
@@ -416,6 +439,7 @@ Inside the mod:
 | `.` | Make the selected folder the root (tree focused) |
 | `/` or `cmd-f` | Find a file (tree focused) or find in the document (preview focused) |
 | `n` / `shift-n` | Next / previous match while the document search is open (preview focused) |
+| `e` | Edit the shown file (preview focused) or the selected file (tree focused) |
 | `b` | Hide or show the file tree (popup) |
 | `g` | Switch the sidebar from Files to Commits, and from Commits or Changes back to Files (in a git repository) |
 | `Backspace` | Back to the commit from a file shown as of that commit (preview focused) |
@@ -436,6 +460,13 @@ In a search field (keys typed there never trigger the shortcuts above):
 | `shift-Enter` | Document search: previous match |
 | `Esc` | Close the search only (the popup stays open) |
 
+While editing (keys go to the editor; the shortcuts above are off in it):
+
+| Key | Action |
+|---|---|
+| `ctrl-s` / `cmd-s` | Save, and keep editing |
+| `Esc` | Cancel: back to the preview (asks first with unsaved changes); on the question, Keep editing |
+
 In an expanded diagram:
 
 | Key | Action |
@@ -444,7 +475,7 @@ In an expanded diagram:
 | `0` | Back to fit |
 | `Esc` | Close the expanded diagram (the popup stays open) |
 
-The top bar also has buttons for the tree, file search, document search, reading zoom (A−, the percentage, A+),
+The top bar also has buttons for the tree, file search, document search, reading zoom (A−, the percentage, A+), edit (✎),
 reload, anchor (popup only: back to the side panel), expand (side panel only: open
 as the popup) and close. An expanded diagram's bar has zoom out, zoom in, fit and close.
 
@@ -466,6 +497,11 @@ as the popup) and close. An expanded diagram's bar has zoom out, zoom in, fit an
   Markdown prose (through `<mark>`); editors expose no highlight or selection API, so code
   fences and code files get per-line marks. The current match's paragraph gets a frame.
 - File search lists at most 50,000 files in a git repository and 20,000 elsewhere.
+- **Editing:** Herdr gives a mod no way to focus its editor or read the cursor, so click
+  into the text to start typing, and there are no "insert at cursor" buttons (bold, link).
+  Clicking a paragraph in the preview doesn't jump to its source. Comments are made in the
+  normal preview, not while editing. A remote save takes one call per 24 KB of base64
+  (about 50 for a 1 MB file), and its unchanged-file check compares a CRC and the size.
 - Leaving an expanded diagram in the popup puts the document back at its top: Herdr
   can't read or restore a scroll position.
 - **The popup's memory doesn't keep the document's scroll position**, for the same
