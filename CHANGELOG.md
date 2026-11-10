@@ -22,7 +22,17 @@ so read its notes before updating.
 - Remote files save through herdr-core (base64 in 24 KB pieces, a `cksum` check, an atomic
   rename that keeps the mode). CRLF files stay CRLF.
 - Unsaved edits of a view that closed without asking come back on the next edit of the
-  file, while the file is unchanged.
+  file, while the file is unchanged. The draft holds the edited text only (a sum of the
+  file, not its text) and is dropped after a day.
+- A remote save's temporary files are made with `mktemp` under `umask 077` (a random
+  name, never readable by other accounts, whatever the file's mode) and are removed when
+  a save fails part-way. The remote machine now needs `mktemp`. Known limit, in the
+  README's Security section: the text still travels as command-line arguments.
+- A remote save is never unchecked: when the file's `cksum` couldn't be taken at the start
+  (or **Use theirs** is still fetching it), the save first compares the file with what
+  editing started from.
+- A remote file with other hard links, or owned by another account, is written through
+  instead of renamed over, so the links survive and the owner doesn't change.
 
 ## 1.1.0 — 2026-11-07 (evilsquid888 fork)
 

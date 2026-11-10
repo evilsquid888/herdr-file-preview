@@ -96,15 +96,18 @@ and Mermaid without mermaid-cli; everything else is the original's.
     **Use theirs** (take the disk's text) or **Keep mine** (save over it). An untouched
     editor simply follows the file as it changes.
   - **Remote files** save through the same connection the preview reads with: the text
-    goes over as base64 in pieces into a temporary file next to the original, then one
-    step checks the file is unchanged (`cksum`), and renames the new text into place,
-    keeping its permissions. A symlink is written through, not replaced. The remote
-    machine needs `base64` (standard on Linux and macOS).
+    goes over as base64 in pieces into a temporary file next to the original (private to
+    your account, with a random name), then one step checks the file is unchanged
+    (`cksum`), and renames the new text into place, keeping its permissions. A symlink, a
+    file with other hard links and another account's file are written through instead, so
+    the link survives and the file keeps its owner. The remote machine needs `base64` and `mktemp`
+    (standard on Linux and macOS). On a machine you share, see
+    [Security](#security) before saving secrets this way.
   - Line endings are kept (a CRLF file stays CRLF). Files over 1 MB, binary files,
     images and files shown as of a commit can't be edited.
   - If the view closes without asking (`Esc` in the tree, the open/close key), your
     unsaved text is kept and comes back the next time you edit that file, as long as the
-    file hasn't changed since.
+    file hasn't changed since. It is kept for a day, in Herdr's `shared.json`.
 - **Windows**: local folders work through Git for Windows' `sh` (its `stat`, `find`,
   `head` and `git`), which the mod finds by itself; remote folders work as from macOS.
   Windows line endings (CRLF) are read correctly.
@@ -335,6 +338,15 @@ still reach, and how the mod keeps it out:
   with crafted images: use it on pictures you trust.
 - **Send to agent** quotes each paragraph's first line, which a file could word to steer
   the agent. It's a draft: read it before you press Enter.
+- **Saving a remote file shows its text to other accounts on that machine.** Herdr gives
+  a mod no way to send data to a remote command except as its arguments, so the file's
+  text travels (as base64) on command lines, which every account on that machine can read
+  from the process list while the save runs, and which command auditing would log. On a
+  machine only you use this doesn't matter. On a shared one, don't save secrets (`.env`,
+  keys) from here: edit them in a terminal. The temporary files themselves are private.
+- **Unsaved edits of a view that closed without asking** are written to Herdr's
+  `shared.json` on this computer, in plain text, for remote files too, until you edit that
+  file again or a day has passed.
 
 ## Install
 

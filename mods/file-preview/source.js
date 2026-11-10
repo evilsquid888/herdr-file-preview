@@ -66,21 +66,35 @@ async function probe(path, on) {
 // pieces (one argument each, under every OS's command-line limit) into a temporary file
 // next to the original; one last script checks the file is still what editing started from
 // (cksum: CRC and size, POSIX everywhere), decodes, keeps the mode and renames it into place.
+//
+// Both temporary files come from mktemp under umask 077: a name nobody can plant a symlink
+// at beforehand, and never readable by others, whatever the original's mode. What this does
+// NOT hide: each piece is an argument of `sh -c`, so other accounts on that machine can read
+// it from the process list while it runs (README: Security). Only a write channel in Herdr
+// (a remote writeTextFile, or stdin on exec) would fix that.
 
 // Base64 characters per exec: under Windows' 32 KiB command line, for a Windows host too.
 const PIECE = 24000;
 const TOKEN = '{ cksum < "$1"; } 2>/dev/null || echo missing';
-const PUT_FIRST = 'printf %s "$2" > "$1"';
+// $1: the temporary file's path without its random end. Prints the path made.
+const MKTEMP = 'umask 077; mktemp "$1.XXXXXX"';
 const PUT_MORE = 'printf %s "$2" >> "$1"';
 // $1 file, $2 base64 temp, $3 expected token ("" = don't check). Prints the new token.
 const COMMIT = [
-  'f=$1; b=$2; o=$2.out',
-  'fail() { rm -f "$b" "$o"; exit "$1"; }',
+  'f=$1; b=$2; o=; u=$(umask); umask 077',
+  'fail() { rm -f "$b"; [ -z "$o" ] || rm -f "$o"; exit "$1"; }',
   'if [ -n "$3" ]; then now=$({ cksum < "$f"; } 2>/dev/null || echo missing); [ "$now" = "$3" ] || fail 4; fi',
+  'o=$(mktemp "$b.XXXXXX" 2>/dev/null) || { o=; fail 7; }',
   '{ base64 -d < "$b" > "$o" || base64 -D < "$b" > "$o"; } 2>/dev/null || fail 5',
-  // A symlink keeps being one: write through it (not atomic, but the link survives).
-  'if [ -L "$f" ]; then cat "$o" > "$f" || fail 6; rm -f "$b" "$o"; else',
-  '  [ -e "$f" ] && chmod "$(stat -c %a "$f" 2>/dev/null || stat -f %Lp "$f")" "$o" 2>/dev/null',
+  // Written through (not atomic) instead of renamed over: a symlink (it stays one), a file with
+  // other hard links (they keep seeing it) and another account's file (it stays theirs, with
+  // its ACLs). Renaming would cut the link or hand the file to us.
+  'n=$(stat -c %h "$f" 2>/dev/null || stat -f %l "$f" 2>/dev/null || echo 1)',
+  'if [ -L "$f" ] || { [ -e "$f" ] && { [ ! -O "$f" ] || [ "$n" != 1 ]; }; }; then cat "$o" > "$f" || fail 6; rm -f "$b" "$o"; else',
+  // The original's mode; a new file gets what the account's own umask gives. If neither
+  // can be worked out the file stays 0600: tighter, never looser.
+  '  if [ -e "$f" ]; then chmod "$(stat -c %a "$f" 2>/dev/null || stat -f %Lp "$f")" "$o" 2>/dev/null',
+  '  else chmod "$(printf %o $((0666 & ~0$u)))" "$o" 2>/dev/null; fi',
   '  mv -f "$o" "$f" || fail 6; rm -f "$b"; fi',
   'cksum < "$f"',
 ].join("\n");
@@ -116,17 +130,26 @@ export async function saveText(path, text, { on, base, token }) {
   }
   const b64 = base64(text);
   const slashAt = path.lastIndexOf("/");
-  const tmp = `${path.slice(0, slashAt + 1)}.${path.slice(slashAt + 1)}.fp-${Date.now().toString(36)}.b64`;
-  for (let i = 0; i === 0 || i < b64.length; i += PIECE) {
-    const r = await sh(i === 0 ? PUT_FIRST : PUT_MORE, ["fp", tmp, b64.slice(i, i + PIECE)], { on });
-    if (r.code !== 0) {
-      await sh('rm -f "$1"', ["fp", tmp], { on }).catch(() => {});
-      throw new Error((r.stderr || "Cannot write there").trim().slice(0, 200));
+  const made = await sh(MKTEMP, ["fp", `${path.slice(0, slashAt + 1)}.${path.slice(slashAt + 1)}.fp`], { on });
+  const tmp = made.code === 0 ? made.stdout.trim() : "";
+  if (!tmp) throw new Error((made.stderr || "Cannot write there").trim().slice(0, 200));
+  // COMMIT removes both temporary files itself on every exit; anything before it, or a call
+  // that never came back (the connection dropped), is cleaned up here as far as it can be.
+  const drop = () => sh('rm -f "$1"', ["fp", tmp], { on }).catch(() => {});
+  let r;
+  try {
+    for (let i = 0; i < b64.length; i += PIECE) {
+      const p = await sh(PUT_MORE, ["fp", tmp, b64.slice(i, i + PIECE)], { on });
+      if (p.code !== 0) throw new Error((p.stderr || "Cannot write there").trim().slice(0, 200));
     }
+    r = await sh(COMMIT, ["fp", path, tmp, token ?? ""], { on });
+  } catch (e) {
+    await drop();
+    throw e;
   }
-  const r = await sh(COMMIT, ["fp", path, tmp, token ?? ""], { on });
   if (r.code === 4) throw new Conflict();
   if (r.code === 5) throw new Error("Cannot decode on that machine (base64 missing?)");
+  if (r.code === 7) throw new Error("Cannot write there");
   if (r.code !== 0) throw new Error((r.stderr || "Cannot save the file there").trim().slice(0, 200));
   return r.stdout.trim() || null;
 }

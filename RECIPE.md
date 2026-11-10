@@ -159,7 +159,11 @@ with no keyboard or pointer automation.
 - `writeTextFile(path, text, expected)` is local only and is the conflict check. Remote
   saves go through `exec`, which has no stdin: base64 in arguments, at most ~24 KB each,
   because Windows caps a whole command line at 32 KiB (a 60 KB piece silently fails
-  there).
+  there). Arguments show in the remote machine's process list: say so in the README, and
+  make both temporary files with `mktemp` under `umask 077` (never a guessable name, never
+  the default mode), removing them when a save fails part-way.
+- The closed-view draft goes in `shared.json`: store the edited text with a sum of the
+  file's text (not the text), and drop it after a day.
 - With `core.autocrlf=true` the working copy is CRLF while the repo is LF; scripts that
   patch the sources should keep each file's endings.
 

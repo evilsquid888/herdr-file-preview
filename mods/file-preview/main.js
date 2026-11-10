@@ -37,8 +37,12 @@ const COPIED_MS = 1500;
 const EDIT_CONTEXT = "FilePreviewEdit", EDIT_SAVE = "file_preview_edit_save", EDIT_CANCEL = "file_preview_edit_cancel";
 const EDIT_DEBOUNCE = 300, SAVED_MS = 2000;
 // Unsaved edits of a view that closed without asking, restored on the next edit of the file.
-const DRAFT_KEY = "file-preview.draft", DRAFT_MAX = 512 * 1024;
+// It lives in shared state, which Herdr writes to shared.json: so it holds only the edited text
+// (not the file's own, just a sum of it to tell "unchanged") and is dropped after DRAFT_TTL.
+const DRAFT_KEY = "file-preview.draft", DRAFT_MAX = 512 * 1024, DRAFT_TTL = 24 * 3600 * 1000;
 const draftKey = (on, abs) => `${on ?? "local"}:${abs}`;
+const draftSum = (text) => `${fnv1a(text)}:${text.length}`;
+const draftFresh = (d) => Date.now() - d?.at < DRAFT_TTL;
 const MAX_EDITORS = 300;     // fences past this stay in the prose, uncolored
 const MAX_DIAGRAM_W = 600;   // diagram display width cap (logical px), besides the column and half the PNG
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -228,6 +232,8 @@ export default class FilePreview extends View {
     } catch {}
     this.edit = null;       // edit mode (startEdit): { rel, abs, on, base, state, dirty, saving, disk, confirm, ... }
     this.editWanted = null; // `e` on another file in the tree: edit it once it has loaded
+    // A draft nobody came back for doesn't stay on disk.
+    try { const d = shared(DRAFT_KEY); if (d && !draftFresh(d)) setShared(DRAFT_KEY, null); } catch {}
     // A panel's expanded diagram: this copy is only that dialog (no tree, context or watchers).
     if (this.mode === "diagram") return this.initDiagram(p, cx);
     this.treeFocus = cx.focus_handle();
@@ -2560,7 +2566,8 @@ export default class FilePreview extends View {
     const draft = shared(DRAFT_KEY);
     if (draft?.key === draftKey(on, e.abs)) {
       setShared(DRAFT_KEY, null);
-      if (draft.base === doc.text && typeof draft.text === "string") {
+      if (!draftFresh(draft)) this.note = "Dropped an unsaved draft: it was over a day old";
+      else if (draft.sum === draftSum(doc.text) && typeof draft.text === "string") {
         state.set_value(draft.text);
         e.dirty = this.editText(e) !== e.base;
         this.note = "Restored your unsaved edits";
@@ -2653,7 +2660,17 @@ export default class FilePreview extends View {
     cx.notify();
     cx.spawn(async (cx) => {
       try {
-        const tk = await saveText(e.abs, text, { on: e.on, base: force ? null : e.base, token: force ? null : e.token });
+        let token = force ? null : e.token;
+        // Remote without a token (asking for it failed, or Use theirs is still fetching it): never
+        // save unchecked. Compare the file with `base` now, then take its token.
+        if (e.on && !force && !token) {
+          const now = await readTextFile(e.abs, { on: e.on }).catch(() => undefined);
+          if (now === undefined) throw new Error("cannot check the file on that machine");
+          if (now !== e.base) throw Object.assign(new Error("changed on disk"), { conflict: true });
+          token = await editToken(e.abs, e.on).catch(() => null);
+          if (!token) throw new Error("cannot check the file on that machine");
+        }
+        const tk = await saveText(e.abs, text, { on: e.on, base: force ? null : e.base, token });
         e.base = text;
         e.token = e.on ? tk : null;
         e.disk = null;
@@ -2707,7 +2724,7 @@ export default class FilePreview extends View {
   keepDraft(e) {
     const text = String(e.state.value() ?? "");
     if (text.length > DRAFT_MAX) return;
-    try { setShared(DRAFT_KEY, { key: draftKey(e.on, e.abs), base: e.base, text, at: Date.now() }); } catch {}
+    try { setShared(DRAFT_KEY, { key: draftKey(e.on, e.abs), sum: draftSum(e.base), text, at: Date.now() }); } catch {}
   }
 
   /** Ends edit mode; the preview reads the file again (it showed the buffer). */
