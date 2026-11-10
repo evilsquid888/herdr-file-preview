@@ -6,8 +6,8 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 home="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
 dest="$home/mods"
 # Mods import only from their own folder: the launcher carries a copy of the popup's dock.js.
-if ! cmp -s "$repo/mods/file-preview/dock.js" "$repo/mods/file-preview-panel/dock.js"; then
-  echo "dock.js differs: cp mods/file-preview/dock.js mods/file-preview-panel/" >&2
+if ! cmp -s "$repo/mods/squid-ink/dock.js" "$repo/mods/squid-ink-panel/dock.js"; then
+  echo "dock.js differs: cp mods/squid-ink/dock.js mods/squid-ink-panel/" >&2
   exit 1
 fi
 for mod in "$repo"/mods/*/; do
@@ -18,9 +18,9 @@ for mod in "$repo"/mods/*/; do
   rsync -a --delete --exclude .cache/ --exclude jsconfig.json --exclude gpui-kit.d.ts "$mod" "$dest/$name/"
   echo "synced $name -> $dest/$name"
 done
-# main-fp: Herdr's main layout with file-preview in the side panel and the tabs-fp bar.
+# main-ink: Herdr's main layout with squid-ink in the side panel and the tabs-ink bar.
 # A layout file is live: Herdr follows an edit within a second (switch to it with
-# `herdr-app do layout.switch '{"name":"main-fp"}'`).
+# `herdr-app do layout.switch '{"name":"main-ink"}'`).
 for layout in "$repo"/layouts/*.json; do
   cp "$layout" "$home/layouts/"
   echo "synced $(basename "$layout") -> $home/layouts/"

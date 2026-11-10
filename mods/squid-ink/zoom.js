@@ -5,9 +5,9 @@ import { v_flex, h_flex, Scrollbar } from "gpui-base";
 import { scaledKey } from "./mermaid.js";
 
 // Esc bound to this context outranks the app's Esc, which would close the whole popup.
-export const ZOOM_CONTEXT = "FilePreviewZoom", ZOOM_ESCAPE = "file_preview_zoom_escape";
+export const ZOOM_CONTEXT = "SquidInkZoom", ZOOM_ESCAPE = "squid_ink_zoom_escape";
 
-const ICON = "mods/file-preview/icons/";
+const ICON = "mods/squid-ink/icons/";
 export const STEP = 1.25;
 const MIN = 0.25, MAX = 8;   // zoom, relative to fit
 const DEVICE = 2;            // display scale assumed (Retina): no API reports it

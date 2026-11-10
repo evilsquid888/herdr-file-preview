@@ -5,7 +5,7 @@
 //   remote: base64 there (one exec through herdr-core) → a temporary text file here →
 //           `base64 -d` here into the cache (no scp, no second connection)
 //   local:  cp into the cache
-// Cached under mods/file-preview/.cache/img/<hash>.<ext>, the hash of machine, path, size and
+// Cached under mods/squid-ink/.cache/img/<hash>.<ext>, the hash of machine, path, size and
 // mtime: an edited picture gets a new file, an unchanged one is copied once. Sizes come from
 // the file's own header (PNG, GIF, JPEG, WebP, BMP, SVG), so a picture lays out at its final size.
 //
@@ -17,7 +17,7 @@ import { fnv1a } from "./mermaid.js";
 
 export const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"]);
 export const MAX_BYTES = 6 * 1024 * 1024;   // exec returns at most 8 MiB, and base64 grows by 4/3
-const REL = "mods/file-preview/.cache/img/";
+const REL = "mods/squid-ink/.cache/img/";
 const dir = () => slash(appHome(), null) + "/" + REL;
 
 export const extOf = (path) => (String(path).match(/\.([A-Za-z0-9]+)$/)?.[1] ?? "").toLowerCase();

@@ -21,7 +21,7 @@ import { sh, slash, localWindows, isWindows } from "./shell.js";
 import { cached, fit, isImage, kittyTerminal } from "./images.js";
 import { isHtml, htmlSegments } from "./html.js";
 
-const ICON = "mods/file-preview/icons/";
+const ICON = "mods/squid-ink/icons/";
 const ROW = 22;              // tree row height
 const FONT = 12;             // code font size at 100 %
 const PROSE = 13;            // Markdown prose size at 100 %
@@ -34,14 +34,14 @@ const CODE_PAD = 6;          // space above and below a fence's text
 const COPIED_MS = 1500;
 // Edit mode: its own key context (Esc and Save must beat the dialog's own Esc), and the
 // live preview of Markdown and HTML redrawn this long after the last keystroke.
-const EDIT_CONTEXT = "FilePreviewEdit", EDIT_SAVE = "file_preview_edit_save", EDIT_CANCEL = "file_preview_edit_cancel";
+const EDIT_CONTEXT = "SquidInkEdit", EDIT_SAVE = "squid_ink_edit_save", EDIT_CANCEL = "squid_ink_edit_cancel";
 const EDIT_DEBOUNCE = 300, SAVED_MS = 2000;
 // Over this many characters, the unsaved mark and the live preview wait for a pause in typing.
 const EDIT_BIG = 256 * 1024;
 // Unsaved edits of a view that closed without asking, restored on the next edit of the file.
 // It lives in shared state, which Herdr writes to shared.json: so it holds only the edited text
 // (not the file's own, just a sum of it to tell "unchanged") and is dropped after DRAFT_TTL.
-const DRAFT_KEY = "file-preview.draft", DRAFT_MAX = 512 * 1024, DRAFT_TTL = 24 * 3600 * 1000;
+const DRAFT_KEY = "squid-ink.draft", DRAFT_MAX = 512 * 1024, DRAFT_TTL = 24 * 3600 * 1000;
 const draftKey = (on, abs) => `${on ?? "local"}:${abs}`;
 const draftSum = (text) => `${fnv1a(text)}:${text.length}`;
 const draftFresh = (d) => Date.now() - d?.at < DRAFT_TTL;
@@ -53,11 +53,11 @@ const COL_W = 1200;                       // reading column cap at 100 % text zo
 const POLL_FILE = 2500, POLL_TREE = 10000;
 const TREE_W = 260, NARROW = 600;   // below NARROW px the tree folds into a strip
 const STRIP_W = 28, NARROW_TREE_W = 220;
-const TREE_KEY = "file-preview.tree.";   // + "popup" | "side" | "panel": the last explicit hide/show, persisted
+const TREE_KEY = "squid-ink.tree.";   // + "popup" | "side" | "panel": the last explicit hide/show, persisted
 // Reading zoom of the document (prose, fences, code view, diagrams); never the bars or the tree.
 const LEVELS = [0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
-const ZOOM_KEY = "file-preview.zoom.";   // + "popup" | "panel": the level, persisted (null at 100 %)
-const TAB_ZOOM_KEY = "file-preview.zoom.side.tabs";   // the side panel's level per tab: { [tab id]: level }
+const ZOOM_KEY = "squid-ink.zoom.";   // + "popup" | "panel": the level, persisted (null at 100 %)
+const TAB_ZOOM_KEY = "squid-ink.zoom.side.tabs";   // the side panel's level per tab: { [tab id]: level }
 // Git decorations: status poll, the code view's line gutter and the long file's overview ruler.
 const POLL_GIT = 5000;
 // A full-height Editor lays out every row each frame: ~16 ms at 1000 rows, 45 ms at 2000.
@@ -67,14 +67,14 @@ const BAR_X = 8;             // a Markdown block's search bar sits this far righ
 const FILES_EVERY = 5000;    // an open file search re-lists the root at most this often
 const MEMORY_DELAY = 500;    // the popup stores its per-root state this long after the last change
 // Commit history in the sidebar.
-const SIDE_KEY = "file-preview.sidebar.";   // + "popup" | "side" | "panel": "commits" | "changes", or null for files
+const SIDE_KEY = "squid-ink.sidebar.";   // + "popup" | "side" | "panel": "commits" | "changes", or null for files
 const CROW = 24;             // commit row height
 const LANE_W = 14, NARROW_LANE_W = 10, MAX_LANES = 10, NARROW_MAX_LANES = 6;
 const COMMITS_W = 460;       // the sidebar's width on the Commits tab, when the view is wide
 const META_W = 360;          // author and date show from this sidebar width
-const SCOPE_KEY = "file-preview.commits.scope";       // "head", or null for all branches
-const REMOTES_KEY = "file-preview.commits.remotes";   // false hides remote branches, else null
-const SIDE_W_KEY = "file-preview.sidebar-width.";   // + mode + "." + "files" | "commits" | "changes" | "narrow": px, or null
+const SCOPE_KEY = "squid-ink.commits.scope";       // "head", or null for all branches
+const REMOTES_KEY = "squid-ink.commits.remotes";   // false hides remote branches, else null
+const SIDE_W_KEY = "squid-ink.sidebar-width.";   // + mode + "." + "files" | "commits" | "changes" | "narrow": px, or null
 const SECTIONS = [["staged", "Staged"], ["unstaged", "Unstaged"], ["untracked", "Untracked"]];   // the Changes tab
 const MIN_SIDE_W = 160, MIN_PREVIEW_W = 240;          // a dragged sidebar keeps the preview at least this wide
 const statusColor = (s, t) => (s === "A" ? t.ansi2 : s === "D" ? t.ansi1 : s === "R" || s === "C" ? t.ansi4 : t.ansi3);
@@ -213,7 +213,7 @@ function syntax() {
   return { keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1, constant: t.ansi6 };
 }
 
-export default class FilePreview extends View {
+export default class SquidInk extends View {
   init(_props, cx) {
     const p = props() ?? {};
     this.overlay = p.overlay ?? null;
@@ -946,7 +946,7 @@ export default class FilePreview extends View {
     const d = { key: b.key, source: b.text, theme: themeOf(this.dark), path: b.d.path, w: b.d.w, h: b.d.h };
     const label = `${this.file} · diagram ${n + 1} of ${list.length}`;
     // A window overlay would draw under this popup's dialog, so the popup draws its own layer.
-    if (!this.overlay) openOverlay({ kind: "dialog", width: 0.95, height: 0.95, mod: "file-preview", props: { mode: "diagram", diagram: d, label } });
+    if (!this.overlay) openOverlay({ kind: "dialog", width: 0.95, height: 0.95, mod: "squid-ink", props: { mode: "diagram", diagram: d, label } });
     else { this.zoom = new Zoom(d, this.mermaid, label); this.zoomFocus.focus(); }
     cx.notify();
   }
@@ -1240,7 +1240,7 @@ export default class FilePreview extends View {
     // Sent when the side panel opens: it takes the keyboard from the terminal.
     if (c === "focus-side") { if (this.mode === "side") (this.viewShown() ? this.previewFocus : this.sideFocus()).focus(); return; }
     if (c === "back") { if (this.viewShown()) this.toList(); return; }
-    // Key names as commands (`file-preview.down`), so the tree can be driven without a keyboard.
+    // Key names as commands (`squid-ink.down`), so the tree can be driven without a keyboard.
     if (c === "reload") return this.reload(cx);
     if (c.startsWith("open:")) return this.reveal(c.slice(5), cx);
     // The root by hand: up one folder, a given absolute folder, or back to following the terminal.
@@ -1435,7 +1435,7 @@ export default class FilePreview extends View {
     const file = this.memFile();
     closeOverlay(this.overlay);
     showSide();
-    if (file) run(`file-preview.open:${this.tree.abs(file)}`);
+    if (file) run(`squid-ink.open:${this.tree.abs(file)}`);
   }
 
   /** Side panel ⤢: the popup in its place, on this file; closing it brings the side panel back. */
@@ -1443,7 +1443,7 @@ export default class FilePreview extends View {
     if (!this.leaveEdit(() => this.popOut(cx), cx)) return;
     const file = this.memFile();
     hideSide();
-    openOverlay({ kind: "dialog", width: 0.95, height: 0.95, mod: "file-preview",
+    openOverlay({ kind: "dialog", width: 0.95, height: 0.95, mod: "squid-ink",
       props: { mode: "popup", from: "side", ...(file ? { file: this.tree.abs(file) } : {}) } });
   }
 

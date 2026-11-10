@@ -1,7 +1,7 @@
 // What the popup had open per root: the shown file and the expanded folders, persisted in shared.
 import { shared, setShared } from "herdr";
 
-export const MEMORY_KEY = "file-preview.memory";
+export const MEMORY_KEY = "squid-ink.memory";
 export const MAX_ROOTS = 20, MAX_EXPANDED = 200;
 
 /** One key per machine and root: "/abs/root" locally, "<machine>:/abs/root" on a remote space. */

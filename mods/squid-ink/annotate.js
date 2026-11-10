@@ -4,7 +4,7 @@
 // belongs to a block: the paragraph under the drag, or the one right-clicked. The block's
 // first line is the quote; the whole block is what the comment is about.
 //
-// Stored in <app home>/data/file-preview/comments.json:
+// Stored in <app home>/data/squid-ink/comments.json:
 //   { version: 1, files: { "<machine | local>:<absolute path>": [note, ...] } }
 //   note = { id, quote, block, start, end, text, at }
 // The quote and block text travel with each note, so a note finds its paragraph again after
@@ -13,7 +13,7 @@ import { appHome, readTextFile, writeTextFile } from "herdr";
 
 export const DRAG_PX = 4;
 
-const file = () => `${appHome()}/data/file-preview/comments.json`;
+const file = () => `${appHome()}/data/squid-ink/comments.json`;
 
 /** "<machine>:<abs>" for a remote file, "local:<abs>" for one on this computer. */
 export const noteKey = (on, abs) => `${on || "local"}:${abs}`;

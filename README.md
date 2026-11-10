@@ -1,6 +1,6 @@
-# file-preview
+# Squid Ink
 
-A [Herdr](https://herdr.dev) layout (`main-fp`) and the mods behind it: a file tree of the
+A [Herdr](https://herdr.dev) layout (`main-ink`) and the mods behind it: a file tree of the
 focused terminal's folder next to a rendered preview of the selected file: Markdown with highlighted code fences,
 Mermaid diagrams and pictures, HTML, images, plus syntax-highlighted source files. You can
 **comment on paragraphs and hand the comments to the agent in that tab** as a draft to
@@ -8,11 +8,15 @@ review, and **edit a file in place** (with a live preview beside Markdown and HT
 while agents edit files, and opens as a side panel on the right of the window (a Preview
 button next to Files and Changes) or as a near-full-screen popup.
 
-This is a fork of [bborrero14/herdr-file-preview](https://github.com/bborrero14/herdr-file-preview)
-(MIT). The fork adds paragraph comments with Send to agent, images, HTML, Windows support
-and Mermaid without mermaid-cli; everything else is the original's.
+Squid Ink grew out of [bborrero14/herdr-file-preview](https://github.com/bborrero14/herdr-file-preview)
+(MIT), and was called `file-preview` until version 2.0.0. It adds editing in place (local
+and remote), paragraph comments with Send to agent, images, HTML, Windows support and
+Mermaid without mermaid-cli; the viewer, the git views and the layout are the original's.
+It installs under its own names (`squid-ink`, `squid-ink-panel`, `tabs-ink`, `main-ink`),
+so it can sit next to the original. Coming from `file-preview` 1.x: see
+[Moving from file-preview](#moving-from-file-preview).
 
-![file-preview in the side panel next to a terminal, showing a Markdown file with a Mermaid diagram, a code fence and a table](preview-panel.png)
+![squid-ink in the side panel next to a terminal, showing a Markdown file with a Mermaid diagram, a code fence and a table](preview-panel.png)
 
 ![The popup on a Markdown file with two paragraph comments, the comments bar with Send to agent, Copy and Clear, and rendered Mermaid diagrams](preview-annotations.png)
 
@@ -28,7 +32,7 @@ and Mermaid without mermaid-cli; everything else is the original's.
   in it to make that folder the root, up to `/` or a drive (`C:/`). **↑** (or `Backspace` in
   the tree) goes up one folder, and `.` on a selected folder makes it the root. While you've
   chosen a root, the preview stops following the terminal; **↺** follows it again. Commands:
-  `file-preview.root-up`, `file-preview.root:<absolute path>`, `file-preview.root-follow`
+  `squid-ink.root-up`, `squid-ink.root:<absolute path>`, `squid-ink.root-follow`
   (bind them in `keys.json` if you like).
 - **Markdown**: CommonMark + GFM (tables, task lists, quotes, strikethrough, links).
   Relative links to `.md` files open inside the mod, and external links open in your
@@ -39,7 +43,7 @@ and Mermaid without mermaid-cli; everything else is the original's.
   A commented paragraph gets a bar in the margin and its comments under it, each with
   **✎** (edit) and **✕** (delete). Comments belong to a paragraph, not to selected words:
   Herdr gives a mod no access to the text you select. They are kept on this computer in
-  `~/.config/herdr-app/data/file-preview/comments.json`, per machine and file, with the
+  `~/.config/herdr-app/data/squid-ink/comments.json`, per machine and file, with the
   paragraph's text and first line, so they find their paragraph again after the file is
   edited (a paragraph that's gone keeps its comment, marked as such in the feedback).
 - **Send to agent: a draft you review.** A bar over a commented file shows the count and
@@ -143,7 +147,7 @@ and Mermaid without mermaid-cli; everything else is the original's.
   skipped, and a root seen for the first time starts clean. When the root follows the
   terminal while the popup is open, the old root's state is saved and the new one's
   restored. The last 20 roots are kept (up to 200 expanded folders each), in the
-  `file-preview.memory` shared value.
+  `squid-ink.memory` shared value.
 - **Hide the file tree** at any width with the sidebar button at the top left or `b`.
   The popup and the side panel each remember the choice.
 - **Code view** with syntax highlighting for JavaScript/TypeScript, Bash/sh/zsh, Python,
@@ -151,7 +155,7 @@ and Mermaid without mermaid-cli; everything else is the original's.
   as an approximation). JSON is always soft-wrapped, so minified one-line files are
   readable. Other text files are shown as plain text.
 - **Two modes**: a side panel and a popup that covers 95 % of the window.
-  - The side panel is the right column of the `main-fp` layout, the same one as Herdr's
+  - The side panel is the right column of the `main-ink` layout, the same one as Herdr's
     Files and Changes panels. The **Preview** button at the top right of the tab bar
     opens and closes it, and the terminals of the tab (all their splits) shrink to make
     room. Drag its left edge to resize it: the width is kept per tab, so each tab (in any
@@ -290,7 +294,7 @@ and Mermaid without mermaid-cli; everything else is the original's.
 
   > **About `PATH`.** Programs started by a mod get a minimal `PATH`, without Homebrew
   > or Node version managers. The mod looks for `mmdc` in this order:
-  > 1. The `MMDC` constant at the top of `mods/file-preview/mermaid.js`, if you set it
+  > 1. The `MMDC` constant at the top of `mods/squid-ink/mermaid.js`, if you set it
   >    to an absolute path.
   > 2. **fnm's default alias**: `~/.local/share/fnm/aliases/default/bin/mmdc`. If you
   >    use fnm, install mermaid-cli under the Node version that is your fnm default.
@@ -316,9 +320,9 @@ As the herdr.dev guidance asks, here is what the mod does outside its own folder
   the agent's terminal and pastes it (never Enter); **View over SSH** starts a terminal on
   that machine (`hc run`) that prints the picture with `python3`, `chafa` or ImageMagick.
 - It **reads files anywhere** under the folder you browse, on local or remote machines.
-- It **writes only** to `~/.config/herdr-app/mods/file-preview/.cache/` (rendered
+- It **writes only** to `~/.config/herdr-app/mods/squid-ink/.cache/` (rendered
   diagrams, cached pictures, the puppeteer config and the browser's profile) and
-  `~/.config/herdr-app/data/file-preview/comments.json` (your comments).
+  `~/.config/herdr-app/data/squid-ink/comments.json` (your comments).
 - It makes **no network requests**: no content leaves your machine.
 
 ### Security
@@ -365,20 +369,20 @@ still reach, and how the mod keeps it out:
    scripts/sync.sh     # rsync mods/* -> ~/.config/herdr-app/mods/ (or $HERDR_APP_HOME/mods/)
    ```
 
-   This installs three mods and a layout: `file-preview` (the viewer),
-   `file-preview-panel` (a tiny launcher that opens or closes the side panel), `tabs-fp`
-   and `layouts/main-fp.json`. The script removes any old symlink first. It also refuses
+   This installs three mods and a layout: `squid-ink` (the viewer),
+   `squid-ink-panel` (a tiny launcher that opens or closes the side panel), `tabs-ink`
+   and `layouts/main-ink.json`. The script removes any old symlink first. It also refuses
    to run if the two copies of `dock.js` differ.
 
-2. Switch to the `main-fp` layout (Settings, or the command below). It is a clone of
-   Herdr's `main` layout (0.1.12) with file-preview added to the right panel, and its tab
-   bar is `tabs-fp`, a clone of Herdr's `tabs` with the Preview button. Herdr's own
+2. Switch to the `main-ink` layout (Settings, or the command below). It is a clone of
+   Herdr's `main` layout (0.1.12) with squid-ink added to the right panel, and its tab
+   bar is `tabs-ink`, a clone of Herdr's `tabs` with the Preview button. Herdr's own
    layouts and mods are read-only, so the clones are the only way to add the button.
-   They don't get Herdr's updates of `main` and `tabs`. Without `main-fp`, `cmd-e`
+   They don't get Herdr's updates of `main` and `tabs`. Without `main-ink`, `cmd-e`
    opens the popup instead.
 
    ```sh
-   herdr-app do layout.switch '{"name":"main-fp"}'
+   herdr-app do layout.switch '{"name":"main-ink"}'
    ```
 
 3. Merge the shortcuts from [`keys.json`](keys.json) into `~/.config/herdr-app/keys.json`:
@@ -386,14 +390,14 @@ still reach, and how the mod keeps it out:
    ```json
    {
      "global": {
-       "cmd-e": "mod.open:file-preview-panel",
-       "cmd-shift-e": "mod.open:file-preview"
+       "cmd-e": "mod.open:squid-ink-panel",
+       "cmd-shift-e": "mod.open:squid-ink"
      }
    }
    ```
 
-4. Optional: run `herdr-app check` on `~/.config/herdr-app/mods/file-preview`,
-   `file-preview-panel` and `tabs-fp`.
+4. Optional: run `herdr-app check` on `~/.config/herdr-app/mods/squid-ink`,
+   `squid-ink-panel` and `tabs-ink`.
 
 ## Updating
 
@@ -406,21 +410,39 @@ To update, replace the installed copies; don't add the repo again. An agent addi
 again finds the names taken and installs a renamed second copy next to yours.
 
 - **From a clone of this repo:** `git pull`, then `scripts/sync.sh`. It replaces the
-  three mod folders and `layouts/main-fp.json` in place.
-- **With Herdr's agent:** ask it to *replace* the installed `file-preview`,
-  `file-preview-panel`, `tabs-fp` and `layouts/main-fp.json` with the ones from
-  `https://github.com/evilsquid888/herdr-file-preview`, keeping the names.
-- **On Windows** (no `rsync`): copy `mods/file-preview`, `mods/file-preview-panel` and
-  `mods/tabs-fp` over the folders in `%USERPROFILE%\.config\herdr-app\mods\`, leaving out
-  `jsconfig.json` and `gpui-kit.d.ts`, and `layouts/main-fp.json` into `layouts\`.
+  three mod folders and `layouts/main-ink.json` in place.
+- **With Herdr's agent:** ask it to *replace* the installed `squid-ink`,
+  `squid-ink-panel`, `tabs-ink` and `layouts/main-ink.json` with the ones from
+  `https://github.com/evilsquid888/herdr-squid-ink`, keeping the names.
+- **On Windows** (no `rsync`): copy `mods/squid-ink`, `mods/squid-ink-panel` and
+  `mods/tabs-ink` over the folders in `%USERPROFILE%\.config\herdr-app\mods\`, leaving out
+  `jsconfig.json` and `gpui-kit.d.ts`, and `layouts/main-ink.json` into `layouts\`.
 
 Your shortcuts, panel widths, zoom levels and remembered files survive an update: they
 live in `keys.json` and Herdr's state, not in the mod folders. If a version's notes list
 a `keys.json` change, merge it by hand.
 
 If you edited the installed files, the update overwrites them. Clone the mod under a new
-name first (`herdr-app do mod.clone '{"name":"file-preview","as":"my-file-preview"}'`) to
+name first (`herdr-app do mod.clone '{"name":"squid-ink","as":"my-squid-ink"}'`) to
 keep your version.
+
+
+### Moving from file-preview
+
+Version 2.0.0 renamed everything, so it installs as new mods next to the old ones:
+
+1. Install as in [Install](#install) and switch to the `main-ink` layout.
+2. In `~/.config/herdr-app/keys.json`, change `mod.open:file-preview-panel` to
+   `mod.open:squid-ink-panel` and `mod.open:file-preview` to `mod.open:squid-ink`. A
+   layout of your own that names the `file-preview` mod needs the same change.
+3. To keep your comments, copy `~/.config/herdr-app/data/file-preview/comments.json` to
+   `~/.config/herdr-app/data/squid-ink/comments.json`.
+4. Delete the old `mods/file-preview`, `mods/file-preview-panel` and `mods/tabs-fp`
+   folders and `layouts/main-fp.json`, unless you want to keep the original installed.
+
+Panel widths, zoom levels and remembered files start fresh (they were stored under
+`file-preview.*`). Commands are now `squid-ink.<name>`.
+
 
 ## Shortcuts
 
@@ -433,7 +455,7 @@ On Windows and Linux, `ctrl-e` and `ctrl-shift-e` often mean something already (
 line in shells, Herdr's split down), so pick free keys there, for example:
 
 ```json
-{ "global": { "alt-e": "mod.open:file-preview-panel", "alt-shift-e": "mod.open:file-preview" } }
+{ "global": { "alt-e": "mod.open:squid-ink-panel", "alt-shift-e": "mod.open:squid-ink" } }
 ```
 
 Comments:
@@ -563,7 +585,7 @@ as the popup) and close. An expanded diagram's bar has zoom out, zoom in, fit an
   `MMDC` in `mermaid.js` (see Requirements) and rerun `scripts/sync.sh`.
 - **A red notice on a diagram** shows mermaid's error, which usually means a syntax
   error in the diagram. Fix the source; **Retry** renders it again. The browser renderer
-  logs each step to `~/.config/herdr-app/mods/file-preview/.cache/mermaid.log`.
+  logs each step to `~/.config/herdr-app/mods/squid-ink/.cache/mermaid.log`.
 - **"Local folders on Windows need Git for Windows"**: install it (see Requirements) and
   press **Retry**.
 - **Send to agent does nothing visible**: the agent's terminal must be on the file's
@@ -571,9 +593,9 @@ as the popup) and close. An expanded diagram's bar has zoom out, zoom in, fit an
 - **"Cannot reach <machine>"** in the tree: the remote machine is offline. The last
   loaded tree stays visible. Press **Retry** when the machine is back.
 - **Nothing happens, or the mod looks broken:** run `herdr-app status` and look at
-  `errors`, then run `herdr-app check ~/.config/herdr-app/mods/file-preview` (and
-  `file-preview-panel`, `tabs-fp`).
-- **No Preview button in the tab bar:** the shown layout isn't `main-fp`. Switch to it
+  `errors`, then run `herdr-app check ~/.config/herdr-app/mods/squid-ink` (and
+  `squid-ink-panel`, `tabs-ink`).
+- **No Preview button in the tab bar:** the shown layout isn't `main-ink`. Switch to it
   (see Install); without it `cmd-e` opens the popup.
 - **Icons are missing:** the mod folder is probably a symlink. Remove it and install
   with `scripts/sync.sh`.
@@ -581,12 +603,12 @@ as the popup) and close. An expanded diagram's bar has zoom out, zoom in, fit an
 ## Repository layout
 
 ```
-mods/file-preview/         the viewer (main.js, tree.js, source.js, markdown.js, lang.js, git.js, commits.js, graph.js, find.js, memory.js, mermaid.js, zoom.js, dock.js, icons/)
+mods/squid-ink/         the viewer (main.js, tree.js, source.js, markdown.js, lang.js, git.js, commits.js, graph.js, find.js, memory.js, mermaid.js, zoom.js, dock.js, icons/)
                            plus annotate.js (comments, feedback), images.js (pictures, View over SSH),
                            html.js (Reading view), shell.js (sh, Git for Windows), vendor/ (mermaid.min.js, MIT)
-mods/file-preview-panel/   launcher for the side panel (main.js, dock.js copy)
-mods/tabs-fp/              Herdr's tab bar (tabs 0.1.12) plus the Preview button and the per-tab panel width
-layouts/main-fp.json       Herdr's main layout (0.1.12) with file-preview in the right panel
+mods/squid-ink-panel/   launcher for the side panel (main.js, dock.js copy)
+mods/tabs-ink/              Herdr's tab bar (tabs 0.1.12) plus the Preview button and the per-tab panel width
+layouts/main-ink.json       Herdr's main layout (0.1.12) with squid-ink in the right panel
 scripts/sync.sh            install / update into ~/.config/herdr-app/mods/ and layouts/
 scripts/make-big-md.sh     generates docs/fixtures/big.md (> 1 MB, not versioned)
 docs/fixtures/             test documents: every language, Mermaid, tables, HTML, binary

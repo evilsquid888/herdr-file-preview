@@ -10,7 +10,7 @@ const MMDC = "";
 // Dev: skip the fnm / PATH / login-shell lookup, so a bogus MMDC exercises the fallback.
 const NO_LOOKUP = false;
 
-const REL = "mods/file-preview/.cache/";      // image() paths are relative to ~/.config/herdr-app
+const REL = "mods/squid-ink/.cache/";      // image() paths are relative to ~/.config/herdr-app
 const TIMEOUT = 20000, KEEP = 200;
 const SIZES = "sizes.json", MAX_SIZES = 2 * KEEP;   // PNG sizes, so a re-render's placeholder has the final height
 
@@ -30,7 +30,7 @@ const WIN_BROWSERS = [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
 ];
-const MOD_DIR = () => appHome() + "/mods/file-preview/";
+const MOD_DIR = () => appHome() + "/mods/squid-ink/";
 const CSP_RENDER = "default-src 'none'; script-src file: 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:";
 const CSP_STATIC = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:";
 

@@ -186,7 +186,7 @@ export async function saveText(path, text, { on, base, token, via = null, args =
  * a copy that landed there but can't be used.
  */
 async function putThere(text, via, on) {
-  const dir = slash(appHome(), null).replace(/\/+$/, "") + "/mods/file-preview/.cache/put/";
+  const dir = slash(appHome(), null).replace(/\/+$/, "") + "/mods/squid-ink/.cache/put/";
   await fs.mkdir(dir, { recursive: true });
   const name = `fp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}.txt`;
   const local = dir + name;

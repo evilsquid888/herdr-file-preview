@@ -1,6 +1,6 @@
 {
   "place": "none",
-  "title": "File preview",
+  "title": "Squid Ink",
   "focusable": true,
   "overlay": { "kind": "dialog", "width": 0.95, "height": 0.95 }
 }

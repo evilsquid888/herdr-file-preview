@@ -7,7 +7,19 @@ Versions follow [Semantic Versioning](https://semver.org/): a major version chan
 something you set up yourself (a mod or layout name, a shortcut, a `keys.json` entry),
 so read its notes before updating.
 
-## Unreleased
+## 2.0.0 — 2026-11-09 (Squid Ink)
+
+### Renamed: file-preview is now Squid Ink
+
+- The repo is `evilsquid888/herdr-squid-ink`. The mods are `squid-ink` (was
+  `file-preview`), `squid-ink-panel` (was `file-preview-panel`) and `tabs-ink` (was
+  `tabs-fp`); the layout is `main-ink` (was `main-fp`). It installs next to the original
+  `file-preview` instead of over it.
+- **Yours to change:** `keys.json` entries (`mod.open:squid-ink-panel`,
+  `mod.open:squid-ink`), any layout of your own that names the mod, and commands
+  (`squid-ink.<name>`). Comments move by copying `data/file-preview/comments.json` to
+  `data/squid-ink/comments.json`. Panel widths, zoom levels and remembered files start
+  fresh. Steps: [Moving from file-preview](README.md#moving-from-file-preview).
 
 ### Editing
 

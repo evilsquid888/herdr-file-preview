@@ -1,4 +1,4 @@
-# File Preview
+# Squid Ink
 
 Herdr's main layout with a file tree of the focused terminal's folder next to a rendered
 preview: Markdown with highlighted code fences and Mermaid diagrams, syntax-highlighted
@@ -6,14 +6,14 @@ source, a GitLab-style commit graph and the uncommitted changes with their diffs
 reloads live while agents edit files, works in local and remote spaces, and opens as a
 side panel on the right of the window or as a near-full-screen popup.
 
-Use this brief to rebuild the mods and the `main-fp` layout from an empty folder. Read
+Use this brief to rebuild the mods and the `main-ink` layout from an empty folder. Read
 `~/.config/herdr-app/AGENTS.md`, `herdr.d.ts` and `gpui-kit.d.ts` first: the
 installed `.d.ts` files are the source of truth for the API. The notes below record
 what the docs leave out, all verified on a real build.
 
 ## What to build
 
-`file-preview` is a file browser and previewer that can also edit a text file in place.
+`squid-ink` is a file browser and previewer that can also edit a text file in place.
 
 - A **lazy file tree** of the focused terminal's `cwd`, which follows the focused
   terminal.
@@ -39,13 +39,13 @@ what the docs leave out, all verified on a real build.
 - **Expanded diagrams**: an expand button on each diagram; fit, zoom `+`/`-`/`0`, two-axis
   scrolling, and a sharper re-render when zoom would upscale.
 - **Two modes:**
-  - **Side panel** (the default): a block in the right column of `main-fp`, a clone of
+  - **Side panel** (the default): a block in the right column of `main-ink`, a clone of
     Herdr's `main` layout, next to Files and Changes. Opened by a **Preview** button in
-    the tab bar (`tabs-fp`, a clone of Herdr's `tabs`) or `cmd-e` →
-    `mod.open:file-preview-panel`, a separate launcher mod. It shows one page at a time:
+    the tab bar (`tabs-ink`, a clone of Herdr's `tabs`) or `cmd-e` →
+    `mod.open:squid-ink-panel`, a separate launcher mod. It shows one page at a time:
     the sidebar's list, or what it opened with a back bar.
   - **Popup:** `mod.json` overlay `{ "kind": "dialog", "width": 0.95, "height": 0.95 }`
-    with `focusable: true`, opened with `cmd-shift-e` → `mod.open:file-preview`, or from
+    with `focusable: true`, opened with `cmd-shift-e` → `mod.open:squid-ink`, or from
     the side panel's expand button (closing it brings the side panel back).
 - **UI text in English.** Use only `theme()` colors. The syntax palette must be hex,
   derived from the theme:
@@ -53,9 +53,9 @@ what the docs leave out, all verified on a real build.
 
 Deliver:
 
-- `mods/file-preview/`
-- `mods/file-preview-panel/`
-- `mods/tabs-fp/` and `layouts/main-fp.json`
+- `mods/squid-ink/`
+- `mods/squid-ink-panel/`
+- `mods/tabs-ink/` and `layouts/main-ink.json`
 - `keys.json` with both shortcuts under `"global"`
 - `scripts/sync.sh` to copy the mods into `~/.config/herdr-app/mods/` and the layout into
   `~/.config/herdr-app/layouts/`
@@ -63,7 +63,7 @@ Deliver:
 ## Architecture
 
 ```
-mods/file-preview/
+mods/squid-ink/
   mod.json      place none, focusable, dialog overlay at 95 %
   main.js       View: layout (top bar, tree, preview column, status bar), modes, context, keys,
                 live reload, block rendering, nextCommand() dev hooks
@@ -76,19 +76,19 @@ mods/file-preview/
                 commit (name-status, numstat, patch, caps), a file at a revision, date formats
   graph.js      one graph cell per commit row: PathBuilder strokes per lane color, the node, the ref-flag pointer (pure)
   find.js       file list (git ls-files or find) + fuzzy ranking; document matches, Markdown match highlights, headings; key contexts
-  memory.js     popup memory per root: { file, expanded } in shared("file-preview.memory"), LRU of 20
+  memory.js     popup memory per root: { file, expanded } in shared("squid-ink.memory"), LRU of 20
   mermaid.js    mmdc + browser lookup, one-at-a-time render queue, .cache/, IHDR size, sizes.json, prune
   zoom.js       Zoom: the expanded diagram (fit, zoom steps, viewport, -s 4 swap) and its keys
   dock.js       the side panel: is the block in the shown layout, shown, show (+ focus-side), hide, toggle
   icons/*.svg   own icons (folder, folder-open, file, file-md, file-code, chevrons, reload, anchor, close,
                 sidebar, expand, zoom-in, zoom-out, fit, deleted, search, search-doc)
-mods/file-preview-panel/
+mods/squid-ink-panel/
   mod.json      { place: none, overlay: { kind: popup, width: 1, height: 1, frame: none } }
   main.js       Launcher View: init() { try { toggle() } finally { if (overlay) closeOverlay(overlay) } }
-  dock.js       byte-for-byte copy of mods/file-preview/dock.js
-mods/tabs-fp/   Herdr's tabs (0.1.12) plus the Preview button (tooltip with the bound key), per-tab panel width
-layouts/main-fp.json   Herdr's main (0.1.12): tabs block → tabs-fp, panel max 1600, panel-body child
-                "file-preview" { mod: "file-preview", props: { mode: "side" } }
+  dock.js       byte-for-byte copy of mods/squid-ink/dock.js
+mods/tabs-ink/   Herdr's tabs (0.1.12) plus the Preview button (tooltip with the bound key), per-tab panel width
+layouts/main-ink.json   Herdr's main (0.1.12): tabs block → tabs-ink, panel max 1600, panel-body child
+                "squid-ink" { mod: "squid-ink", props: { mode: "side" } }
 ```
 
 **Context** works like the shipped `files` mod's `location()`:
@@ -127,7 +127,7 @@ Tree keys:
 
 Ignore keys that carry platform, control or alt modifiers.
 
-**Dev hooks:** `nextCommand()` accepts the same keys as `file-preview.<key>`, plus
+**Dev hooks:** `nextCommand()` accepts the same keys as `squid-ink.<key>`, plus
 `reload`, `anchor`, `retry-diagrams`, `open:<path>` (relative to the root, or
 absolute), `expand:<n>` (n-th diagram, from 0), `zoom-in`, `zoom-out`, `zoom-fit`,
 `zoom-close`, `text-in`, `text-out`, `text-reset` (reading zoom), `copy:<n>` (the n-th code box's copy button, from 0; check with
@@ -290,7 +290,7 @@ with no keyboard or pointer automation.
     diagram…" placeholder then gets the final height.
 - **Cache:**
   - Key = `fnv1a(source + "|" + theme)`.
-  - Files: `~/.config/herdr-app/mods/file-preview/.cache/<key>.{mmd,png}`. `image()`
+  - Files: `~/.config/herdr-app/mods/squid-ink/.cache/<key>.{mmd,png}`. `image()`
     takes the path relative to `~/.config/herdr-app`.
   - The folder must be **hidden** (`.cache`). Any visible write inside a mod folder
     hot-reloads the mod.
@@ -311,7 +311,7 @@ with no keyboard or pointer automation.
 ### Side panel and launcher
 
 - **A layout block, not a pane.** A pane made with `pane.split` is one more pane of the
-  tab. The side panel is the stack child `file-preview` of the right column `panel` in a
+  tab. The side panel is the stack child `squid-ink` of the right column `panel` in a
   layout (as Herdr's Files and Changes): showing the column shrinks the whole tab block.
   Herdr's layouts and mods are read-only, so clone them (`layout.clone`, `mod.clone`) and
   version the clones; the tab bar's buttons are hardcoded in `tabs`, so the clone adds
@@ -319,10 +319,10 @@ with no keyboard or pointer automation.
   hide: `layout.hide`; state: `layout()`'s `hidden` and the stack's `active`. Without the
   block in the shown layout, fall back to `mod.open` (the popup).
 - **One copy for the window.** The block's mod lives across tabs and spaces, so anything
-  per tab is kept by tab id: the width in `tabs-fp` (`layout.resize {id: "panel", px}` on
+  per tab is kept by tab id: the width in `tabs-ink` (`layout.resize {id: "panel", px}` on
   a tab change, a drag recorded for the shown tab, a 1 s guard while the resize lands,
   the shown width adopted on the first render), the reading zoom in
-  `shared("file-preview.zoom.side.tabs")`.
+  `shared("squid-ink.zoom.side.tabs")`.
 - **A key binding can't look at the layout first**: `command:value` runs one command. The
   launcher is a mod whose `mod.json` is an invisible popup overlay (`frame: "none"`); its
   `init` toggles the side panel, then closes its own overlay.
@@ -332,7 +332,7 @@ with no keyboard or pointer automation.
 - **Mods import only from their own folder**, so `dock.js` is duplicated in both mods.
   Make the sync script refuse to run when the copies differ.
 - **Keyboard:** showing the block doesn't focus it. `showSide()` and the Preview button
-  run `file-preview.focus-side`, and the side copy focuses its list or its page.
+  run `squid-ink.focus-side`, and the side copy focuses its list or its page.
 - **Popup from the side panel:** `openOverlay({ kind: "dialog", … props: { from: "side",
   file } })`. Herdr closes a dialog on Esc before the mod sees the key, so the popup shows
   the side panel again from its `close()` hook (any way it closes).
@@ -353,12 +353,12 @@ with no keyboard or pointer automation.
 - **Resizable sidebar** (popup): `h_resizable(id)` with a `resizable_panel()` for the sidebar
   (`size`, `size_range(160, width − 240)`, `visible(shown)`) and one for the preview. One
   group id per layout key (Files, Commits, Changes, narrow) so each keeps its width;
-  `on_resize` stores it in `shared("file-preview.sidebar-width.<mode>.<key>")`.
+  `on_resize` stores it in `shared("squid-ink.sidebar-width.<mode>.<key>")`.
 - In the popup, `b` and a sidebar button at the left of the top bar hide or show the tree
   at any width. Hidden, the tree leaves a 28 px strip (with a folder button), as a narrow
   view does. The side panel has no strip: it shows one page at a time.
 - **`localStorage` is per mod copy**, and every popup is a new copy, so it forgets. Store
-  the choice with `setShared("file-preview.tree.<popup|panel>", bool)` (persisted in
+  the choice with `setShared("squid-ink.tree.<popup|panel>", bool)` (persisted in
   `shared.json`); read it once in `init` so open copies in other tabs don't flip.
 - With nothing stored: shown, except a narrow view keeps its launch default. A stored
   choice wins at every width.
@@ -366,7 +366,7 @@ with no keyboard or pointer automation.
 ### Popup memory per root
 
 - The popup (a copy with `props().overlay`) and the side panel, which follows the focused
-  terminal from root to root. One shared value, `setShared("file-preview.memory", { entries: { [key]: { file,
+  terminal from root to root. One shared value, `setShared("squid-ink.memory", { entries: { [key]: { file,
   expanded: [...], at } } })`, with `key` = the root (local) or `<machine>:<root>` (remote).
   Keep the 20 most recent roots by `at`; store at most 200 folders, shallowest first (a
   cut then keeps every kept folder's parents). An empty state drops its entry.
@@ -395,9 +395,9 @@ with no keyboard or pointer automation.
   `occlude()`, so an absolute layer over the document would let presses, hovers and
   wheel events reach the tree and the document under it. EditorStates stay retained;
   only the document's scroll position is lost.
-- **Panel: `openOverlay({ kind: "dialog", width: 0.95, height: 0.95, mod: "file-preview", props: { mode: "diagram", diagram, label } })`.**
+- **Panel: `openOverlay({ kind: "dialog", width: 0.95, height: 0.95, mod: "squid-ink", props: { mode: "diagram", diagram, label } })`.**
   The same mod in a third mode: `init` returns early (no tree, context, watchers or
-  prune) and `render` draws only the viewer. Every visible copy gets `file-preview.*`
+  prune) and `render` draws only the viewer. Every visible copy gets `squid-ink.*`
   commands, so each copy ignores the ones that aren't for it.
 - **Esc:** the app handles Esc first and closes the popup's dialog before the layer's
   `on_key_down` sees it, so `cx.stop_propagation()` is not enough. Bind it yourself, scoped
@@ -442,7 +442,7 @@ with no keyboard or pointer automation.
 - **Keys** without modifiers on the tree and preview handlers: `+` or `=` in, `-` out, `0`
   reset. The expanded diagram has its own focus handle and its own `+ − 0`, so the two
   never mix.
-- Persist: the popup like the tree, `setShared("file-preview.zoom.popup", z)` (`null` at
+- Persist: the popup like the tree, `setShared("squid-ink.zoom.popup", z)` (`null` at
   100 %), read once in `init`; the side panel per tab (see Side panel). The diagram-mode
   copy ignores it.
 
@@ -506,7 +506,7 @@ with no keyboard or pointer automation.
 ### Commit history
 
 - **Tabs:** `Files | Commits | Changes` over the sidebar, only while the git status says the root is
-  in a repo (`this.git` non-null). The choice lives in `shared("file-preview.sidebar.<mode>")`
+  in a repo (`this.git` non-null). The choice lives in `shared("squid-ink.sidebar.<mode>")`
   ("commits", "changes" or null); the effective tab is the stored one while `git`, else "files",
   so a non-repo root shows Files without losing the preference. Until the first status of a
   context answers (`gitPending`), keep a stored git tab and its tabs bar ("Loading history…"):
@@ -522,7 +522,7 @@ with no keyboard or pointer automation.
   `--branches --tags HEAD`; "current branch" is `HEAD`, with remotes `HEAD @{u}` when
   `rev-parse -q --verify @{u}` resolves. `%D` still lists remote refs on local commits, so
   without remotes drop them from `refs` **and recompute the flags** (rows draw the flags).
-  Scope and remotes are remembered in `shared("file-preview.commits.scope|remotes")`. Ask for one more than the page to know whether there is more. Exit 6 (no
+  Scope and remotes are remembered in `shared("squid-ink.commits.scope|remotes")`. Ask for one more than the page to know whether there is more. Exit 6 (no
   `rev-parse --verify HEAD`) → "No commits yet". `%D`: `HEAD -> x` is the current branch,
   `tag: x` a tag, `<remote>/x` a remote (from `git remote`), `*/HEAD` dropped.
 - **Paging:** `--skip` continues the same topological order, so lanes carry over between
@@ -647,9 +647,9 @@ with no keyboard or pointer automation.
   - Plain code layout (no repo, > 1000 lines, soft-wrapped): an 8 px strip of its own next
     to the git ruler, with proportional marks; the current one is wider, in `t.foreground`.
 - **Esc and cmd-f.** Bind once in `init`:
-  `cx.bind_keys([{keystroke:"escape", action, context:"FilePreviewFind"}, {keystroke:"cmd-f", action:open, context:"FilePreviewTree"}, {… "FilePreviewDoc"}])`.
-  Put `.key_context("FilePreviewFind").on_action(escape, …)` on the find bar that wraps the
-  `Input`, and `.key_context("FilePreviewTree"|"FilePreviewDoc").on_action(open, …)` on the
+  `cx.bind_keys([{keystroke:"escape", action, context:"SquidInkFind"}, {keystroke:"cmd-f", action:open, context:"SquidInkTree"}, {… "SquidInkDoc"}])`.
+  Put `.key_context("SquidInkFind").on_action(escape, …)` on the find bar that wraps the
+  `Input`, and `.key_context("SquidInkTree"|"SquidInkDoc").on_action(open, …)` on the
   panes. A context binding beats the app's Esc, which would close the popup.
   `window.dispatch_action(name)` reaches the same handler; the herdr `window()` import
   shadows the global, so use `globalThis.window`.
@@ -715,9 +715,9 @@ with no keyboard or pointer automation.
     hidden `.cache/`.
   - `herdr-app check` runs `init` headless: `focused()` is null and spawned tasks don't
     finish. Always verify with `herdr-app shot`.
-- **Paths:** the mod hardcodes `mods/file-preview/` for icons and the cache. If you
-  rename the mod, update those paths, the `"file-preview"` mod name in `dock.js` and
-  `tabs-fp`, and the block in `main-fp.json`.
+- **Paths:** the mod hardcodes `mods/squid-ink/` for icons and the cache. If you
+  rename the mod, update those paths, the `"squid-ink"` mod name in `dock.js` and
+  `tabs-ink`, and the block in `main-ink.json`.
 - **`herdr-app check` on the repo folder fails** (the manifest's read roots point at the
   installed copy): sync, then check `~/.config/herdr-app/mods/<name>`.
 
@@ -737,9 +737,9 @@ with no keyboard or pointer automation.
 ## Updating an install
 
 Herdr never updates layouts or mods added from herdr.dev. Versions are git tags, listed
-in `CHANGELOG.md`. Asked to update an existing install, replace `mods/file-preview/`,
-`mods/file-preview-panel/`, `mods/tabs-fp/` and `layouts/main-fp.json` in place under
+in `CHANGELOG.md`. Asked to update an existing install, replace `mods/squid-ink/`,
+`mods/squid-ink-panel/`, `mods/tabs-ink/` and `layouts/main-ink.json` in place under
 the same names (`scripts/sync.sh` does this from a clone) instead of adding the repo
 again, which renames the new copy because the names are taken. Keep the installed
-`mods/file-preview/.cache/`. The person's state lives in `shared.json` and survives.
+`mods/squid-ink/.cache/`. The person's state lives in `shared.json` and survives.
 Merge any `keys.json` change the version's notes list.

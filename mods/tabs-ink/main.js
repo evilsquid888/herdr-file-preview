@@ -1,11 +1,11 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-// file-preview's clone of Herdr's tabs (0.1.12): the same bar plus a Preview button that opens
-// file-preview in the side panel, the stack child "file-preview" of the main-fp layout.
+// squid-ink's clone of Herdr's tabs (0.1.12): the same bar plus a Preview button that opens
+// squid-ink in the side panel, the stack child "squid-ink" of the main-ink layout.
 import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, keys } from "herdr";
 
-const PREVIEW = "file-preview";
-const PANEL_W = 368;   // the side panel's width in main-fp.json: where a tab never resized starts
+const PREVIEW = "squid-ink";
+const PANEL_W = 368;   // the side panel's width in main-ink.json: where a tab never resized starts
 
 // A keys.json combo as Herdr's status bar writes it: "cmd-shift-e" is ⌘⇧E on macOS, Ctrl+Shift+E elsewhere.
 function shortcut(combo, mac) {
@@ -17,7 +17,7 @@ function shortcut(combo, mac) {
 /** The Preview button's hover: what it does, and the key bound to the same (the launcher's). */
 function previewTip(mac) {
   const k = keys().find(b => b.section === "global" && b.action === `mod.open:${PREVIEW}-panel`);
-  return "Open or close the file preview" + (k ? ` (${shortcut(k.keys, mac)})` : "");
+  return "Open or close Squid Ink" + (k ? ` (${shortcut(k.keys, mac)})` : "");
 }
 
 function find(node, id) {
@@ -142,7 +142,7 @@ export default class Tabs extends View {
           if (on) run("layout.hide", { id: "panel" });
           else {
             run("layout.select", { stack: "panel-body", child: id }); run("layout.show", { id: "panel" });
-            if (id === PREVIEW) run(`${PREVIEW}.focus-side`);   // file-preview takes the keyboard
+            if (id === PREVIEW) run(`${PREVIEW}.focus-side`);   // squid-ink takes the keyboard
           }
         }).child(svg(icon).size(14)).child(label);
     };
@@ -153,9 +153,9 @@ export default class Tabs extends View {
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
-      .when(Boolean(find(root, PREVIEW)), el => el.child(panelButton(PREVIEW, "Preview", "mods/file-preview/icons/file-md.svg", previewTip(w?.platform === "macos"))))
-      .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs-fp/win-min.svg").size(16) : "−", () => run("window.minimize")))
-        .child(button("maximize", w.platform === "windows" ? svg(`mods/tabs-fp/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
-        .child(button("close-window", w.platform === "windows" ? svg("mods/tabs-fp/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));
+      .when(Boolean(find(root, PREVIEW)), el => el.child(panelButton(PREVIEW, "Preview", "mods/squid-ink/icons/file-md.svg", previewTip(w?.platform === "macos"))))
+      .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs-ink/win-min.svg").size(16) : "−", () => run("window.minimize")))
+        .child(button("maximize", w.platform === "windows" ? svg(`mods/tabs-ink/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
+        .child(button("close-window", w.platform === "windows" ? svg("mods/tabs-ink/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));
   }
 }

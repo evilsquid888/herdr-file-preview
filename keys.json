@@ -1,6 +1,6 @@
 {
   "global": {
-    "cmd-e": "mod.open:file-preview-panel",
-    "cmd-shift-e": "mod.open:file-preview"
+    "cmd-e": "mod.open:squid-ink-panel",
+    "cmd-shift-e": "mod.open:squid-ink"
   }
 }

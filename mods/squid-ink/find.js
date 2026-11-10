@@ -4,8 +4,8 @@ import { exec } from "herdr";
 import { sh, slash, localWindows } from "./shell.js";
 
 // Esc and cmd-f bound to these contexts outrank the app's bindings (Esc closes the popup).
-export const FIND_CONTEXT = "FilePreviewFind", FIND_ESCAPE = "file_preview_find_escape";
-export const TREE_CONTEXT = "FilePreviewTree", DOC_CONTEXT = "FilePreviewDoc", FIND_OPEN = "file_preview_find_open";
+export const FIND_CONTEXT = "SquidInkFind", FIND_ESCAPE = "squid_ink_find_escape";
+export const TREE_CONTEXT = "SquidInkTree", DOC_CONTEXT = "SquidInkDoc", FIND_OPEN = "squid_ink_find_open";
 
 export const MAX_RESULTS = 200;
 const MAX_GIT = 50000, MAX_FIND = 20000, DEPTH = 12, BYTES = 4000000;

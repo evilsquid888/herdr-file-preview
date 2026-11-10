@@ -1,10 +1,10 @@
-// file-preview in the layout's side panel (main-fp: the stack child "file-preview" of the right
+// squid-ink in the layout's side panel (main-ink: the stack child "squid-ink" of the right
 // column "panel", next to Files and Changes), for the launcher and the popup's Anchor button.
-// Mods import only from their own folder, so mods/file-preview-panel/dock.js is a byte-for-byte
+// Mods import only from their own folder, so mods/squid-ink-panel/dock.js is a byte-for-byte
 // copy (scripts/sync.sh refuses a mismatch).
 import { panes, focused, layout, run } from "herdr";
 
-export const MOD = "file-preview";
+export const MOD = "squid-ink";
 const PANEL = "panel", STACK = "panel-body";
 
 function find(node, id) {
@@ -21,13 +21,13 @@ export function sideAvailable() {
   return Boolean(find(layout(), MOD));
 }
 
-/** The side panel is open on file-preview. */
+/** The side panel is open on squid-ink. */
 export function sideShown() {
   const root = layout(), panel = find(root, PANEL), body = find(root, STACK);
   return Boolean(panel && !panel.hidden && body?.active === MOD);
 }
 
-/** Opens the side panel on file-preview, which takes the keyboard. */
+/** Opens the side panel on squid-ink, which takes the keyboard. */
 export function showSide() {
   run("layout.select", { stack: STACK, child: MOD });
   run("layout.show", { id: PANEL });

@@ -1,5 +1,5 @@
 {
   "place": "none",
-  "title": "File preview (side panel)",
+  "title": "Squid Ink (side panel)",
   "overlay": { "kind": "popup", "width": 1, "height": 1, "frame": "none" }
 }

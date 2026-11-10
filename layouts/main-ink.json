@@ -79,7 +79,7 @@
           "id": "tabs",
           "type": "block",
           "content": {
-            "mod": "tabs-fp"
+            "mod": "tabs-ink"
           },
           "size": {
             "px": 42
@@ -142,10 +142,10 @@
                       }
                     },
                     {
-                      "id": "file-preview",
+                      "id": "squid-ink",
                       "type": "block",
                       "content": {
-                        "mod": "file-preview",
+                        "mod": "squid-ink",
                         "props": {
                           "mode": "side"
                         }
