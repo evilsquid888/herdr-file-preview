@@ -36,6 +36,26 @@ so read its notes before updating.
   editing started from.
 - A remote file with other hard links, or owned by another account, is written through
   instead of renamed over, so the links survive and the owner doesn't change.
+- Fixed: a remote save could overwrite a change made just as editing started (or just
+  as **Use theirs** was pressed), with no banner. The file's `cksum` is now taken
+  together with a read of the file, and counts only when the two agree.
+- Fixed: a check of the file that was still running when a save finished could put the
+  text from before the save back in the editor, or show a false "changed on disk".
+- Fixed: a load of the file still on its way when editing started could replace the
+  live preview, or (file gone) drop the edit. A view that has to drop an edit without
+  being able to ask now keeps it as a draft.
+- Fixed: `e` on another file in the tree while editing opened it without editing it.
+- Fixed: `e` while a commit or a change was on screen started an edit nobody could see.
+- Line endings are kept line by line: in a file with both LF and CRLF, only the lines
+  you changed take the file's usual ending (before, one CRLF made every line CRLF and the
+  file showed as changed at once).
+- A remote save no longer falls back to command arguments on its own. With no live
+  terminal there, or when `hc put` fails, it stops and a banner asks (**Send as
+  arguments**); an upload that landed but couldn't be used is deleted there.
+- A read-only remote file is refused instead of replaced, and a writable file in a folder
+  you can't write to is saved (written through).
+- A file over 256 KB checks for unsaved changes and redraws its live preview after a
+  pause in typing, not on every key.
 
 ## 1.1.0 — 2026-11-07 (evilsquid888 fork)
 

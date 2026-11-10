@@ -141,7 +141,8 @@ action down the focus path, as the bound key would), and the history hooks: `tab
 `tab:changes`, `change:<n | path>` (n counts files only), and the side panel's `popout`,
 `back` and `focus-side`, and the edit hooks: `edit` (the shown file), `edit-text:<text>`
 (replace the buffer, as typing would), `edit-append:<text>` (add to its end: a big file's
-buffer is too long for one command line), `save`, `save-force` (Keep mine), `cancel` and
+buffer is too long for one command line), `edit:<path>` (`e` on that file's row in the
+tree), `save`, `save-force` (Keep mine), `save-args` (Send as arguments), `cancel` and
 `discard` (Discard on the unsaved-changes question). Key names (`down`, `enter`, …) go to the commit list while the
 Commits tab shows. Commands reach every open copy (popup and side panel), so guard them
 by mode. These hooks make the mod testable with `herdr-app do` and `herdr-app shot`,
@@ -167,7 +168,21 @@ with no keyboard or pointer automation.
   preferring `focused().terminal`.
 - Fallback without a terminal there: base64 in `exec` arguments, at most ~24 KB each,
   because Windows caps a whole command line at 32 KiB (a 60 KB piece silently fails
-  there). Arguments show in the remote machine's process list: say so in the README.
+  there). Arguments show in the remote machine's process list: never fall back on your
+  own, ask first (`saveText` rejects with `needArgs`), and say so in the README. `hc put
+  --json` prints its errors as JSON too (`error.message`).
+- A change token (`cksum`) asked for on its own may describe a newer file than the text
+  you hold. Take it before and after a read of the file and use it only when both agree
+  and the text read is yours (`tokenFor`).
+- Async disk checks race with saves: give the edit a generation number that bumps when
+  its base text changes, drop any check started under an older one, and re-run a check
+  that was asked for while one was running or a save was on.
+- A file load still running when editing starts must be cancelled (bump the load
+  sequence), or it lands on top of the edit.
+- The Editor works on LF text. Keep each line's ending from the file (`eolPlan` /
+  `withEols` in source.js): lines before and after the edited stretch keep theirs.
+- `herdr-app do` commands run on the UI thread: after opening a ~1 MB Markdown file, wait
+  several seconds before the next command, and don't trust a `shot` taken meanwhile.
 - Every temporary file there comes from `mktemp` under `umask 077` (never a guessable name,
   never the default mode), and the rename's temporary sits next to the target (not next to
   the upload), so `mv` stays on one filesystem. Remove them on every failure.

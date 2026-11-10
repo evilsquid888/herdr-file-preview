@@ -101,12 +101,16 @@ and Mermaid without mermaid-cli; everything else is the original's.
     unchanged (`cksum`), copies the text into a private temporary file next to the
     original, and renames it into place, keeping its permissions; the uploaded copy is
     deleted. A symlink, a file with other hard links and another account's file are written
-    through instead, so the link survives and the file keeps its owner. With no live
-    terminal on that machine, the text goes as base64 pieces instead ("Saved (no terminal
-    there: sent as arguments)"; see [Security](#security)). The remote machine needs
-    `mktemp` (and `base64` for that fallback), standard on Linux and macOS.
-  - Line endings are kept (a CRLF file stays CRLF). Files over 1 MB, binary files,
-    images and files shown as of a commit can't be edited.
+    through instead, so the link survives and the file keeps its owner; so is a file in a
+    folder you can't write to. A read-only file is refused. With no live terminal on that
+    machine (or when `hc put` fails), nothing is sent: a banner asks first whether to send
+    the text as command arguments instead (**Send as arguments**; see
+    [Security](#security)), and remembers the answer for that edit. The remote machine
+    needs `mktemp` (and `base64` for that fallback), standard on Linux and macOS.
+  - Line endings are kept, line by line: a CRLF file stays CRLF, and in a file with both
+    kinds only the lines you changed take the file's usual one. Files over 1 MB, binary
+    files, images and files shown as of a commit can't be edited, and no file while a
+    commit or a change is on screen.
   - If the view closes without asking (`Esc` in the tree, the open/close key), your
     unsaved text is kept and comes back the next time you edit that file, as long as the
     file hasn't changed since. It is kept for a day, in Herdr's `shared.json`.
@@ -340,14 +344,14 @@ still reach, and how the mod keeps it out:
   with crafted images: use it on pictures you trust.
 - **Send to agent** quotes each paragraph's first line, which a file could word to steer
   the agent. It's a draft: read it before you press Enter.
-- **Saving a remote file with no terminal on that machine shows its text to other
-  accounts there.** A remote save normally sends the text as a file over herdr-core
-  (`hc put`), never on a command line. Only when that machine has no live terminal (or
-  `hc put` fails) does it fall back to base64 pieces as command arguments, which every
-  account there can read from the process list while the save runs, and which command
-  auditing would log; the status then says "sent as arguments". On a shared machine, keep
-  a terminal open there before saving secrets (`.env`, keys). The temporary files are
-  private either way.
+- **Saving a remote file as arguments shows its text to other accounts there.** A remote
+  save sends the text as a file over herdr-core (`hc put`), never on a command line. When
+  that machine has no live terminal (or `hc put` fails) the save stops and asks. Only if
+  you choose **Send as arguments** does the text go as base64 pieces in command
+  arguments, which every account there can read from the process list while the save
+  runs, and which command auditing would log; the status then says "sent as arguments".
+  On a shared machine, open a terminal there instead and save again. The temporary files
+  are private either way.
 - **Unsaved edits of a view that closed without asking** are written to Herdr's
   `shared.json` on this computer, in plain text, for remote files too, until you edit that
   file again or a day has passed.
