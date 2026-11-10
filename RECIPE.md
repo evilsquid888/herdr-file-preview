@@ -156,12 +156,21 @@ with no keyboard or pointer automation.
 - The dialog's `Esc` closes the popup before `on_key_down` sees it: bind `escape` (and
   `ctrl-s` / `cmd-s`) with `cx.bind_keys` to actions in an edit key context on the preview
   pane, and keep `onKey` out of the way while editing (it would take `r`, `b`, `/`, …).
-- `writeTextFile(path, text, expected)` is local only and is the conflict check. Remote
-  saves go through `exec`, which has no stdin: base64 in arguments, at most ~24 KB each,
+- `writeTextFile(path, text, expected)` is local only and is the conflict check. Neither
+  `exec` nor the mod's `hc()` has stdin, so `hc file write` (stdin) is out, and
+  `hc file edit --old` matches anywhere in the file (an append by an agent still matches:
+  not a conflict check). Remote saves use **`hc put <machine/tN> <local file>`**: it sends
+  a file over herdr-core beside that terminal (`~/.local/state/herdr-core/default/files/
+  tN/`, under a 700 folder) and prints `{bytes, path}` with `--json`; check `bytes`. Write
+  the local copy with `fs.writeFile` (mode 0600) under the mod's `.cache/` and unlink it.
+  Pick the terminal from `terminals()` (`address` is `machine/tN`, `state` "live"),
+  preferring `focused().terminal`.
+- Fallback without a terminal there: base64 in `exec` arguments, at most ~24 KB each,
   because Windows caps a whole command line at 32 KiB (a 60 KB piece silently fails
-  there). Arguments show in the remote machine's process list: say so in the README, and
-  make both temporary files with `mktemp` under `umask 077` (never a guessable name, never
-  the default mode), removing them when a save fails part-way.
+  there). Arguments show in the remote machine's process list: say so in the README.
+- Every temporary file there comes from `mktemp` under `umask 077` (never a guessable name,
+  never the default mode), and the rename's temporary sits next to the target (not next to
+  the upload), so `mv` stays on one filesystem. Remove them on every failure.
 - The closed-view draft goes in `shared.json`: store the edited text with a sum of the
   file's text (not the text), and drop it after a day.
 - With `core.autocrlf=true` the working copy is CRLF while the repo is LF; scripts that

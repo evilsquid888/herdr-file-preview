@@ -26,8 +26,11 @@ so read its notes before updating.
   file, not its text) and is dropped after a day.
 - A remote save's temporary files are made with `mktemp` under `umask 077` (a random
   name, never readable by other accounts, whatever the file's mode) and are removed when
-  a save fails part-way. The remote machine now needs `mktemp`. Known limit, in the
-  README's Security section: the text still travels as command-line arguments.
+  a save fails part-way. The remote machine now needs `mktemp`.
+- Remote saves send the text as a file with `hc put` to a terminal on that machine, over
+  herdr-core, so it never appears on a command line (there or here), in one transfer.
+  Only a machine with no live terminal falls back to base64 pieces as arguments, and the
+  status says so ("sent as arguments").
 - A remote save is never unchecked: when the file's `cksum` couldn't be taken at the start
   (or **Use theirs** is still fetching it), the save first compares the file with what
   editing started from.

@@ -1,5 +1,6 @@
 // Reads one file for preview, here or on a remote machine.
-import { exec, readTextFile, writeTextFile } from "herdr";
+import { exec, readTextFile, writeTextFile, hc, appHome } from "herdr";
+import * as fs from "fs/promises";
 import { isMarkdown } from "./lang.js";
 import { sh, slash, localWindows } from "./shell.js";
 
@@ -62,16 +63,22 @@ async function probe(path, on) {
 // ---- saving (edit mode) ----------------------------------------------------------
 //
 // Local: writeTextFile writes only while the file still holds the text editing started from,
-// and swaps it in atomically. Remote: exec has no stdin, so the text goes there as base64 in
-// pieces (one argument each, under every OS's command-line limit) into a temporary file
-// next to the original; one last script checks the file is still what editing started from
-// (cksum: CRC and size, POSIX everywhere), decodes, keeps the mode and renames it into place.
+// and swaps it in atomically.
 //
-// Both temporary files come from mktemp under umask 077: a name nobody can plant a symlink
-// at beforehand, and never readable by others, whatever the original's mode. What this does
-// NOT hide: each piece is an argument of `sh -c`, so other accounts on that machine can read
-// it from the process list while it runs (README: Security). Only a write channel in Herdr
-// (a remote writeTextFile, or stdin on exec) would fix that.
+// Remote, first choice: the text goes into a private temporary file here, and `hc put` sends
+// it over herdr-core's own connection beside a terminal on that machine (herdr-core's state
+// folder there, private to the account). No file text is ever an argument, there or here.
+// Then one script there (COMMIT) checks the file is still what editing started from (cksum:
+// CRC and size, POSIX everywhere), copies the text into a private temporary file next to the
+// original, keeps the mode and renames it into place, and deletes what `hc put` left.
+//
+// Remote, fallback (no live terminal on that machine, or `hc put` failed): exec has no stdin,
+// so the text goes as base64 in pieces, each an argument of `sh -c`, into a temporary file
+// next to the original, then the same COMMIT. Other accounts there can read those arguments
+// from the process list while it runs (README: Security).
+//
+// Every temporary file there comes from mktemp under umask 077: a name nobody can plant a
+// symlink at beforehand, and never readable by others, whatever the original's mode.
 
 // Base64 characters per exec: under Windows' 32 KiB command line, for a Windows host too.
 const PIECE = 24000;
@@ -79,13 +86,15 @@ const TOKEN = '{ cksum < "$1"; } 2>/dev/null || echo missing';
 // $1: the temporary file's path without its random end. Prints the path made.
 const MKTEMP = 'umask 077; mktemp "$1.XXXXXX"';
 const PUT_MORE = 'printf %s "$2" >> "$1"';
-// $1 file, $2 base64 temp, $3 expected token ("" = don't check). Prints the new token.
+// $1 file, $2 what came over (base64, or the raw text with $4 = raw), $3 expected token
+// ("" = don't check). Removes $2 on every exit. Prints the new token.
 const COMMIT = [
   'f=$1; b=$2; o=; u=$(umask); umask 077',
   'fail() { rm -f "$b"; [ -z "$o" ] || rm -f "$o"; exit "$1"; }',
   'if [ -n "$3" ]; then now=$({ cksum < "$f"; } 2>/dev/null || echo missing); [ "$now" = "$3" ] || fail 4; fi',
-  'o=$(mktemp "$b.XXXXXX" 2>/dev/null) || { o=; fail 7; }',
-  '{ base64 -d < "$b" > "$o" || base64 -D < "$b" > "$o"; } 2>/dev/null || fail 5',
+  // Next to the original, so the rename stays on one filesystem (atomic).
+  'o=$(mktemp "$(dirname "$f")/.$(basename "$f").fp.XXXXXX" 2>/dev/null) || { o=; fail 7; }',
+  'if [ "$4" = raw ]; then cat "$b" > "$o" || fail 7; else { base64 -d < "$b" > "$o" || base64 -D < "$b" > "$o"; } 2>/dev/null || fail 5; fi',
   // Written through (not atomic) instead of renamed over: a symlink (it stays one), a file with
   // other hard links (they keep seeing it) and another account's file (it stays theirs, with
   // its ACLs). Renaming would cut the link or hand the file to us.
@@ -113,10 +122,12 @@ export async function editToken(path, on) {
 
 /**
  * Saves `text` to `path`. Local: only if the file still equals `base` (null: whatever it holds).
- * Remote: only if its token still equals `token` (null: don't check). Resolves with the new
- * token (remote) or null; rejects with Conflict when the file moved on, else with an Error.
+ * Remote: only if its token still equals `token` (null: don't check). `via`: a live terminal
+ * on that machine (`spark/t19`) for `hc put`; without one, or when it fails, base64 pieces.
+ * Resolves with { token, how } (token: remote's new one, else null; how: "local" | "put" |
+ * "pieces"); rejects with Conflict when the file moved on, else with an Error.
  */
-export async function saveText(path, text, { on, base, token }) {
+export async function saveText(path, text, { on, base, token, via = null }) {
   if (!on) {
     let expected = base;
     if (expected === null) expected = await readTextFile(path).catch(() => null);
@@ -126,25 +137,63 @@ export async function saveText(path, text, { on, base, token }) {
       if (now !== undefined && now !== expected) throw new Conflict();
       throw new Error(String(e?.message ?? e));
     }
-    return null;
+    return { token: null, how: "local" };
   }
+  const landed = via ? await putThere(text, via).catch(() => null) : null;
+  if (landed) return { token: await commit(path, landed, token, on, true), how: "put" };
+  return { token: await sendPieces(path, text, token, on), how: "pieces" };
+}
+
+/**
+ * `hc put`: the text as a file beside terminal `via`, over herdr-core. Resolves with where it
+ * landed there; rejects when it couldn't (the caller falls back to pieces). The file here is
+ * removed whatever happens.
+ */
+async function putThere(text, via) {
+  const dir = slash(appHome(), null).replace(/\/+$/, "") + "/mods/file-preview/.cache/put/";
+  await fs.mkdir(dir, { recursive: true });
+  const local = dir + `fp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}.txt`;
+  try {
+    await fs.writeFile(local, text, { encoding: "utf8", mode: 0o600 });
+    const r = await hc(["put", "--json", via, local]);
+    if (r.code !== 0) throw new Error((r.stderr || r.stdout || "hc put failed").trim().slice(0, 200));
+    const out = JSON.parse(r.stdout);
+    if (typeof out?.path !== "string" || !out.path.startsWith("/")) throw new Error("hc put: no path");
+    if (out.bytes !== utf8Bytes(text)) throw new Error(`hc put: ${out.bytes} bytes arrived, ${utf8Bytes(text)} sent`);
+    return out.path;
+  } finally {
+    await fs.unlink(local).catch(() => {});
+  }
+}
+
+/** The fallback: base64 pieces as arguments into a private temporary file, then COMMIT. */
+async function sendPieces(path, text, token, on) {
   const b64 = base64(text);
   const slashAt = path.lastIndexOf("/");
   const made = await sh(MKTEMP, ["fp", `${path.slice(0, slashAt + 1)}.${path.slice(slashAt + 1)}.fp`], { on });
   const tmp = made.code === 0 ? made.stdout.trim() : "";
   if (!tmp) throw new Error((made.stderr || "Cannot write there").trim().slice(0, 200));
-  // COMMIT removes both temporary files itself on every exit; anything before it, or a call
-  // that never came back (the connection dropped), is cleaned up here as far as it can be.
-  const drop = () => sh('rm -f "$1"', ["fp", tmp], { on }).catch(() => {});
-  let r;
   try {
     for (let i = 0; i < b64.length; i += PIECE) {
       const p = await sh(PUT_MORE, ["fp", tmp, b64.slice(i, i + PIECE)], { on });
       if (p.code !== 0) throw new Error((p.stderr || "Cannot write there").trim().slice(0, 200));
     }
-    r = await sh(COMMIT, ["fp", path, tmp, token ?? ""], { on });
   } catch (e) {
-    await drop();
+    await sh('rm -f "$1"', ["fp", tmp], { on }).catch(() => {});
+    throw e;
+  }
+  return commit(path, tmp, token, on, false);
+}
+
+/**
+ * COMMIT on `tmp` (which it removes on every exit). A call that never came back (the
+ * connection dropped) removes it from here, as far as it can.
+ */
+async function commit(path, tmp, token, on, raw) {
+  let r;
+  try { r = await sh(COMMIT, ["fp", path, tmp, token ?? "", raw ? "raw" : ""], { on }); }
+  catch (e) {
+    await sh('rm -f "$1"', ["fp", tmp], { on }).catch(() => {});
     throw e;
   }
   if (r.code === 4) throw new Conflict();
@@ -152,6 +201,19 @@ export async function saveText(path, text, { on, base, token }) {
   if (r.code === 7) throw new Error("Cannot write there");
   if (r.code !== 0) throw new Error((r.stderr || "Cannot save the file there").trim().slice(0, 200));
   return r.stdout.trim() || null;
+}
+
+/** UTF-8 length in bytes, what `hc put` reports. */
+function utf8Bytes(text) {
+  let n = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c < 0xdc00 && i + 1 < text.length) { n += 4; i++; }
+    else n += 3;
+  }
+  return n;
 }
 
 /** UTF-8 safe base64 (the mod runtime has no TextEncoder or Buffer). */

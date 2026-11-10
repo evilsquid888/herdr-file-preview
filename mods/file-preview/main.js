@@ -3,7 +3,7 @@
 // It follows the focused terminal (local or remote space) and reloads what it shows when it changes.
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, h_resizable, resizable_panel, Editor, EditorState, TextView, Scrollbar, v_virtual_list, VirtualListScrollHandle, InputState, Input, Textarea, TextareaState } from "gpui-base";
-import { spaces, panes, focused, exec, watchFolder, readTextFile, theme, settings, props, closeOverlay, openOverlay, nextCommand, home, window, run, shared, setShared, agents } from "herdr";
+import { spaces, panes, focused, exec, watchFolder, readTextFile, theme, settings, props, closeOverlay, openOverlay, nextCommand, home, window, run, shared, setShared, agents, terminals } from "herdr";
 import { Tree, parent, PER_FOLDER, TOTAL } from "./tree.js";
 import { readSource, stamp, LIMIT, saveText, editToken } from "./source.js";
 import { segment } from "./markdown.js";
@@ -193,6 +193,16 @@ function blend(a, b, w) {
   let out = "#";
   for (let i = 1; i < 7; i += 2) out += Math.round(w * parseInt(a.slice(i, i + 2), 16) + (1 - w) * parseInt(b.slice(i, i + 2), 16)).toString(16).padStart(2, "0");
   return out;
+}
+/**
+ * A live terminal on machine `on` (`spark/t19`), for `hc put` (source.js: saveText): the
+ * focused one when it is there, else the first. null when that machine has none.
+ */
+function terminalOn(on) {
+  const mine = (a) => typeof a === "string" && a.startsWith(on + "/");
+  const f = focused()?.terminal;
+  if (mine(f)) return f;
+  try { return (terminals() ?? []).find((t) => mine(t?.address) && t.state === "live")?.address ?? null; } catch { return null; }
 }
 const matches = (n) => `${n.toLocaleString("en-US")} match${n === 1 ? "" : "es"}`;
 
@@ -2670,7 +2680,9 @@ export default class FilePreview extends View {
           token = await editToken(e.abs, e.on).catch(() => null);
           if (!token) throw new Error("cannot check the file on that machine");
         }
-        const tk = await saveText(e.abs, text, { on: e.on, base: force ? null : e.base, token });
+        const res = await saveText(e.abs, text, { on: e.on, base: force ? null : e.base, token, via: e.on ? terminalOn(e.on) : null });
+        const tk = res.token;
+        e.how = res.how;
         e.base = text;
         e.token = e.on ? tk : null;
         e.disk = null;
@@ -2751,7 +2763,7 @@ export default class FilePreview extends View {
 
   editBar(t) {
     const e = this.edit, name = e.rel.split("/").pop();
-    const status = e.saving ? "Saving…" : e.error ? e.error : e.saved && Date.now() - e.saved < SAVED_MS && !e.dirty ? "Saved"
+    const status = e.saving ? "Saving…" : e.error ? e.error : e.saved && Date.now() - e.saved < SAVED_MS && !e.dirty ? (e.how === "pieces" ? "Saved (no terminal there: sent as arguments)" : "Saved")
       : e.dirty ? "Unsaved changes" : "No changes";
     const btn = (id, label, primary, enabled, go, tip) => h_flex().id(id).h(24).flex_none().px(12).items_center().rounded(5).text_size(12)
       .when(primary && enabled, (el) => el.bg(t.solid).text_color(t.solid_foreground).hover((s) => s.bg(t.accent).text_color(t.accent_foreground)))
@@ -2772,7 +2784,7 @@ export default class FilePreview extends View {
         .child(tab("fp-edit-source-tab", "Source", "source"))
         .child(tab("fp-edit-preview-tab", "Preview", "preview"))))
       .child(div().flex_1().min_w(0).truncate().text_right().text_size(11)
-        .text_color(e.error ? t.ansi1 : status === "Saved" ? t.ansi2 : t.dim).child(status))
+        .text_color(e.error ? t.ansi1 : status.startsWith("Saved") ? t.ansi2 : t.dim).child(status))
       .child(btn("fp-edit-cancel", "Cancel", false, true, (_ev, cx) => this.cancelEdit(cx), "Back to the preview (Esc)"))
       .child(btn("fp-edit-save", "Save", true, (e.dirty || Boolean(e.disk)) && !e.saving, (_ev, cx) => this.saveEdit(cx), "Save the file (Ctrl+S / Cmd+S)"));
   }
